@@ -20,6 +20,17 @@ public class Message {
         this.visibilityExpiresAt = 0 ;
     }
 
+    Message(String id, String topic, byte[] payload, long publishedAt, long visibilityExpiresAt, int deliveryAttempts, int maxRetries, MessageStatus status){
+        this.id = id;
+        this.topic = topic;
+        this.payload = payload;
+        this.publishedAt = publishedAt;
+        this.visibilityExpiresAt = visibilityExpiresAt;
+        this.deliveryAttempts = deliveryAttempts;
+        this.maxRetries = maxRetries;
+        this.status = status;
+    }
+
     public String getId() {
         return id;
     }
