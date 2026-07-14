@@ -13,10 +13,12 @@ public class MessageQueue {
     private Map<String, Message> inFlight;
     private DeadLetterQueue deadLetterQueue;
     private PriorityQueue<Message> timeoutQueue;
+    private MessageStore store;
 
-    public MessageQueue(String topic, int capacity) {
+    public MessageQueue(String topic, int capacity, MessageStore store) {
         this.topic = topic;
         this.capacity = capacity;
+        this.store = store;
         this.lock = new ReentrantLock();
         this.notEmpty = lock.newCondition();
         this.notFull = lock.newCondition();
@@ -34,6 +36,7 @@ public class MessageQueue {
                 notFull.await();
             }
 
+            store.save(message);
             messages.addLast(message);
             notEmpty.signal();
         } catch (java.lang.InterruptedException e) {
@@ -52,9 +55,11 @@ public class MessageQueue {
                 notEmpty.await();
             }
             message = messages.removeFirst();
+            long expiresAt = System.currentTimeMillis() + visibilityTimeout;
+            store.markInFlight(message.getId(), expiresAt);
             message.setStatus(MessageStatus.IN_FLIGHT);
+            message.setVisibilityExpiresAt(expiresAt);
             this.inFlight.put(message.getId(), message);
-            message.setVisibilityExpiresAt(System.currentTimeMillis() + visibilityTimeout);
             this.timeoutQueue.add(message);
             notFull.signal();
         } catch (java.lang.InterruptedException e) {
@@ -70,6 +75,7 @@ public class MessageQueue {
         Message message = inFlight.get(messageId);
         try {
             if (message != null) {
+                store.markAcknowledged(messageId);
                 inFlight.remove(messageId);
                 message.setStatus(MessageStatus.ACKNOWLEDGED);
             }
@@ -86,15 +92,18 @@ public class MessageQueue {
             if (message != null) {
                 message.incrementDeliveryAttempts();
                 if (reason == Reason.REJECTED) {
+                    store.markDeadLettered(messageId);
                     message.setStatus(MessageStatus.DEAD_LETTERED);
                     this.deadLetterQueue.add(message);
                     inFlight.remove(messageId);
                 }
                 else if (reason == Reason.FAILED) {
                     if (message.getDeliveryAttempts() >= message.getMaxRetries()) {
+                        store.markDeadLettered(messageId);
                         message.setStatus(MessageStatus.DEAD_LETTERED);
                         this.deadLetterQueue.add(message);
                     } else {
+                        store.save(message);
                         message.setStatus(MessageStatus.AVAILABLE);
                         this.messages.addFirst(message);
                         notEmpty.signal();
@@ -121,9 +130,11 @@ public class MessageQueue {
                 head = this.timeoutQueue.poll();
                 head.incrementDeliveryAttempts();
                 if (head.getDeliveryAttempts() >= head.getMaxRetries()) {
+                    store.markDeadLettered(head.getId());
                     head.setStatus(MessageStatus.DEAD_LETTERED);
                     this.deadLetterQueue.add(head);
                 } else {
+                    store.save(head);
                     head.setStatus(MessageStatus.AVAILABLE);
                     this.messages.add(head);
                     notEmpty.signal();

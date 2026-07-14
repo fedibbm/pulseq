@@ -1,3 +1,4 @@
 .idea/
 *.iml
 md_files/
+*.class

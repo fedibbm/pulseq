@@ -7,10 +7,12 @@ import java.util.concurrent.ConcurrentHashMap;
 class QueueManager {
     public static final int MAX_CAPACITY = 1000;
     private Map<String, MessageQueue> queues;
+    private MessageStore store;
 
 
-    public QueueManager(){
+    public QueueManager(MessageStore store){
         this.queues = new ConcurrentHashMap<>() ;
+        this.store = store;
     }
 
     void publish(String topic, Message message){
@@ -25,10 +27,17 @@ class QueueManager {
 
     boolean createQueue(String topic){
         if(!this.queues.containsKey(topic)){
-            this.queues.put(topic, new MessageQueue(topic, MAX_CAPACITY));
+            this.queues.put(topic, new MessageQueue(topic, MAX_CAPACITY, store));
             return true;
         }
         return false;
+    }
+
+    void recover() {
+        for (Message message : store.loadAllAvailable()) {
+            message.setStatus(MessageStatus.AVAILABLE);
+            publish(message.getTopic(), message);
+        }
     }
 
     List<String> listTopics(){
