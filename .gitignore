@@ -2,3 +2,4 @@
 *.iml
 md_files/
 *.class
+out/
