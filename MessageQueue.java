@@ -145,5 +145,16 @@ public class MessageQueue {
         }
     }
 
+    public DeadLetterQueue getDeadLetterQueue() {
+        return deadLetterQueue;
+    }
 
+    public int size() {
+        lock.lock();
+        try {
+            return messages.size();
+        } finally {
+            lock.unlock();
+        }
+    }
 }
