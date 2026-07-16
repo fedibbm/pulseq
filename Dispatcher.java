@@ -18,6 +18,7 @@ public class Dispatcher {
     }
 
     void subscribe(String topic, MessageListener session) {
+        queueManager.createQueue(topic);
         if (!this.sessions.containsKey(topic)) {
             this.sessions.put(topic, new CopyOnWriteArrayList<>());
         }
