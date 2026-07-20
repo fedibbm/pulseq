@@ -3,3 +3,5 @@
 md_files/
 *.class
 out/
+pulseq-core/target/
+pulseq-sdk/target/
