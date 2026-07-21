@@ -1,32 +1,33 @@
+package com.pulseq.core;
+
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-class QueueManager {
+public class QueueManager {
     public static final int MAX_CAPACITY = 1000;
     private Map<String, MessageQueue> queues;
     private MessageStore store;
 
-
-    public QueueManager(MessageStore store){
-        this.queues = new ConcurrentHashMap<>() ;
+    public QueueManager(MessageStore store) {
+        this.queues = new ConcurrentHashMap<>();
         this.store = store;
     }
 
-    void publish(String topic, Message message){
-        if(!this.queues.containsKey(topic)){
+    public void publish(String topic, Message message) {
+        if (!this.queues.containsKey(topic)) {
             this.createQueue(topic);
         }
         getQueue(topic).enqueue(message);
     }
-    public MessageQueue getQueue(String topic){
+
+    public MessageQueue getQueue(String topic) {
         return this.queues.get(topic);
     }
 
-    boolean createQueue(String topic){
-        if(!this.queues.containsKey(topic)){
+    boolean createQueue(String topic) {
+        if (!this.queues.containsKey(topic)) {
             this.queues.put(topic, new MessageQueue(topic, MAX_CAPACITY, store));
             return true;
         }
@@ -40,8 +41,7 @@ class QueueManager {
         }
     }
 
-    List<String> listTopics(){
+    List<String> listTopics() {
         return new ArrayList<>(this.queues.keySet());
     }
-
 }

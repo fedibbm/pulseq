@@ -1,4 +1,8 @@
-public class Main {
+package com.pulseq.sdk;
+
+import com.pulseq.core.*;
+
+public class SdkDemo {
     public static void main(String[] args) throws InterruptedException {
         MessageStore store = new InMemoryMessageStore();
         QueueManager queueManager = new QueueManager(store);
@@ -9,7 +13,7 @@ public class Main {
         VisibilityTimeoutChecker checker = new VisibilityTimeoutChecker(queueManager);
         checker.start();
 
-        System.out.println("=== PulseQ Broker SDK Demo ===\n");
+        System.out.println("=== PulseQ Broker Demo ===\n");
 
         client.subscribe("orders", message -> {
             System.out.println("[Orders] Received: " + new String(message.getPayload()) + " (attempt " + message.getDeliveryAttempts() + ")");

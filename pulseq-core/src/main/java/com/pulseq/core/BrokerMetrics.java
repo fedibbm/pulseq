@@ -1,6 +1,9 @@
+package com.pulseq.core;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 public class BrokerMetrics {
     private final Map<String, AtomicLong> queueDepths;
@@ -33,14 +36,10 @@ public class BrokerMetrics {
 
     MetricsSnapshot snapshot() {
         return new MetricsSnapshot(
-            Map.copyOf(queueDepths.entrySet().stream()
-                .collect(java.util.stream.Collectors.toMap(
-                    Map.Entry::getKey,
-                    e -> e.getValue().get()))),
-            Map.copyOf(throughput.entrySet().stream()
-                .collect(java.util.stream.Collectors.toMap(
-                    Map.Entry::getKey,
-                    e -> e.getValue().get())))
+                Map.copyOf(queueDepths.entrySet().stream()
+                        .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().get()))),
+                Map.copyOf(throughput.entrySet().stream()
+                        .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().get())))
         );
     }
 }

@@ -1,3 +1,4 @@
+-- PulseQ PostgreSQL Schema
 CREATE TABLE IF NOT EXISTS messages (
     id                  VARCHAR(36)  PRIMARY KEY,
     topic               VARCHAR(255) NOT NULL,
