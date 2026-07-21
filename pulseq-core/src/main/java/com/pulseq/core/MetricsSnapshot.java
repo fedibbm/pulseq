@@ -1,3 +1,5 @@
+package com.pulseq.core;
+
 import java.util.Map;
 
 public class MetricsSnapshot {
@@ -9,11 +11,6 @@ public class MetricsSnapshot {
         this.throughput = throughput;
     }
 
-    public Map<String, Long> getQueueDepths() {
-        return queueDepths;
-    }
-
-    public Map<String, Long> getThroughput() {
-        return throughput;
-    }
+    public Map<String, Long> getQueueDepths() { return queueDepths; }
+    public Map<String, Long> getThroughput() { return throughput; }
 }

@@ -1,12 +1,11 @@
-import java.util.ArrayList;
-import java.util.HashMap;
+package com.pulseq.core;
+
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class Dispatcher {
-
     private Map<String, List<MessageListener>> sessions;
     private QueueManager queueManager;
     private Map<String, Thread> threads;
@@ -17,7 +16,7 @@ public class Dispatcher {
         this.threads = new ConcurrentHashMap<>();
     }
 
-    void subscribe(String topic, MessageListener session) {
+    public void subscribe(String topic, MessageListener session) {
         queueManager.createQueue(topic);
         if (!this.sessions.containsKey(topic)) {
             this.sessions.put(topic, new CopyOnWriteArrayList<>());
@@ -48,7 +47,6 @@ public class Dispatcher {
             consumerThread.interrupt();
             threads.remove(topic);
         }
-
     }
 
     void dispatch(String topic, Message message) {
@@ -57,11 +55,10 @@ public class Dispatcher {
         for (MessageListener listener : listeners) {
             listener.onMessage(message);
         }
-
     }
 
     void onSessionClosed(MessageListener session) {
-        for(String topic : this.sessions.keySet()){
+        for (String topic : this.sessions.keySet()) {
             unsubscribe(topic, session);
         }
     }

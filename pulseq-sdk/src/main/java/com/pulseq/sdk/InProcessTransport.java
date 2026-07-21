@@ -1,3 +1,6 @@
+package com.pulseq.sdk;
+
+import com.pulseq.core.*;
 import java.util.UUID;
 
 public class InProcessTransport implements ClientTransport {

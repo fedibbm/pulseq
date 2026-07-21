@@ -1,3 +1,7 @@
+package com.pulseq.sdk;
+
+import com.pulseq.core.*;
+
 public class PulseQClient {
     private final ClientTransport transport;
 

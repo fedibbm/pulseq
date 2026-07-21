@@ -1,3 +1,5 @@
+package com.pulseq.core;
+
 import java.util.*;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
@@ -28,23 +30,20 @@ public class MessageQueue {
         this.timeoutQueue = new PriorityQueue<>(Comparator.comparingLong(Message::getVisibilityExpiresAt));
     }
 
-
     void enqueue(Message message) {
         lock.lock();
         try {
             while (messages.size() >= capacity) {
                 notFull.await();
             }
-
             store.save(message);
             messages.addLast(message);
             notEmpty.signal();
-        } catch (java.lang.InterruptedException e) {
+        } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
             lock.unlock();
         }
-
     }
 
     Message dequeue() {
@@ -62,7 +61,7 @@ public class MessageQueue {
             this.inFlight.put(message.getId(), message);
             this.timeoutQueue.add(message);
             notFull.signal();
-        } catch (java.lang.InterruptedException e) {
+        } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
             lock.unlock();
@@ -70,7 +69,7 @@ public class MessageQueue {
         return message;
     }
 
-    boolean ack(String messageId) {
+    public boolean ack(String messageId) {
         lock.lock();
         Message message = inFlight.get(messageId);
         try {
@@ -85,7 +84,7 @@ public class MessageQueue {
         return message != null;
     }
 
-    boolean nack(String messageId, Reason reason) {
+    public boolean nack(String messageId, Reason reason) {
         lock.lock();
         Message message = inFlight.get(messageId);
         try {
@@ -96,8 +95,7 @@ public class MessageQueue {
                     message.setStatus(MessageStatus.DEAD_LETTERED);
                     this.deadLetterQueue.add(message);
                     inFlight.remove(messageId);
-                }
-                else if (reason == Reason.FAILED) {
+                } else if (reason == Reason.FAILED) {
                     if (message.getDeliveryAttempts() >= message.getMaxRetries()) {
                         store.markDeadLettered(messageId);
                         message.setStatus(MessageStatus.DEAD_LETTERED);
@@ -119,7 +117,8 @@ public class MessageQueue {
 
     void requeueTimedOut() {
         lock.lock();
-        try{
+        try {
+            boolean requeued = false;
             while (!timeoutQueue.isEmpty()) {
                 Message head = timeoutQueue.peek();
                 if (this.inFlight.get(head.getId()) == null) {
@@ -137,17 +136,16 @@ public class MessageQueue {
                     store.save(head);
                     head.setStatus(MessageStatus.AVAILABLE);
                     this.messages.add(head);
-                    notEmpty.signal();
+                    requeued = true;
                 }
             }
-        }finally {
+            if (requeued) notEmpty.signal();
+        } finally {
             lock.unlock();
         }
     }
 
-    public DeadLetterQueue getDeadLetterQueue() {
-        return deadLetterQueue;
-    }
+    public DeadLetterQueue getDeadLetterQueue() { return deadLetterQueue; }
 
     public int size() {
         lock.lock();
