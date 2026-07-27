@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS messages (
     status              VARCHAR(16)  NOT NULL DEFAULT 'AVAILABLE',
     delivery_attempts   INT          NOT NULL DEFAULT 0,
     visibility_expires_at BIGINT    NOT NULL DEFAULT 0,
-    max_retries         INT          NOT NULL DEFAULT 3
+    max_retries         INT          NOT NULL DEFAULT 3,
+    ttl_millis          BIGINT       NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_topic_status ON messages(topic, status);
+CREATE INDEX IF NOT EXISTS idx_messages_status_published ON messages(status, published_at);

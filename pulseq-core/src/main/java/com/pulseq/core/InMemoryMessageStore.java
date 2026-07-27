@@ -49,4 +49,34 @@ public class InMemoryMessageStore implements MessageStore {
         }
         return result;
     }
+
+    @Override
+    public List<Message> loadDeadLettered() {
+        List<Message> result = new ArrayList<>();
+        for (Message message : store.values()) {
+            if (message.getStatus() == MessageStatus.DEAD_LETTERED) {
+                result.add(message);
+            }
+        }
+        result.sort(java.util.Comparator.comparingLong(Message::getPublishedAt));
+        return result;
+    }
+
+    @Override
+    public int sweepCompleted(long cutoffMillis) {
+        int removed = 0;
+        for (Message message : store.values()) {
+            if (message.getPublishedAt() < cutoffMillis && isTerminal(message.getStatus())) {
+                store.remove(message.getId());
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    private static boolean isTerminal(MessageStatus status) {
+        return status == MessageStatus.ACKNOWLEDGED
+                || status == MessageStatus.DEAD_LETTERED
+                || status == MessageStatus.EXPIRED;
+    }
 }

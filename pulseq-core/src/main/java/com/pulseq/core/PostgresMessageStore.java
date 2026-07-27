@@ -21,8 +21,8 @@ public class PostgresMessageStore implements MessageStore {
 
     @Override
     public void save(Message message) {
-        String sql = "INSERT INTO messages (id, topic, payload, published_at, status, delivery_attempts, visibility_expires_at, max_retries) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        String sql = "INSERT INTO messages (id, topic, payload, published_at, status, delivery_attempts, visibility_expires_at, max_retries, ttl_millis) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + "ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, delivery_attempts = EXCLUDED.delivery_attempts, visibility_expires_at = EXCLUDED.visibility_expires_at";
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -34,6 +34,7 @@ public class PostgresMessageStore implements MessageStore {
             stmt.setInt(6, message.getDeliveryAttempts());
             stmt.setLong(7, message.getVisibilityExpiresAt());
             stmt.setInt(8, message.getMaxRetries());
+            stmt.setLong(9, message.getTtlMillis());
             stmt.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to save message", e);
@@ -99,6 +100,39 @@ public class PostgresMessageStore implements MessageStore {
         return result;
     }
 
+    @Override
+    public List<Message> loadDeadLettered() {
+        String sql = "SELECT * FROM messages WHERE status = ? ORDER BY published_at";
+        List<Message> result = new ArrayList<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, MessageStatus.DEAD_LETTERED.name());
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    result.add(mapRow(rs));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to load dead-lettered messages", e);
+        }
+        return result;
+    }
+
+    @Override
+    public int sweepCompleted(long cutoffMillis) {
+        String sql = "DELETE FROM messages WHERE status IN (?, ?, ?) AND published_at < ?";
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, MessageStatus.ACKNOWLEDGED.name());
+            stmt.setString(2, MessageStatus.DEAD_LETTERED.name());
+            stmt.setString(3, MessageStatus.EXPIRED.name());
+            stmt.setLong(4, cutoffMillis);
+            return stmt.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to sweep completed messages", e);
+        }
+    }
+
     private Message mapRow(ResultSet rs) throws SQLException {
         return new Message(
                 rs.getString("id"),
@@ -108,7 +142,8 @@ public class PostgresMessageStore implements MessageStore {
                 rs.getLong("visibility_expires_at"),
                 rs.getInt("delivery_attempts"),
                 rs.getInt("max_retries"),
-                MessageStatus.valueOf(rs.getString("status"))
+                MessageStatus.valueOf(rs.getString("status")),
+                rs.getLong("ttl_millis")
         );
     }
 }
