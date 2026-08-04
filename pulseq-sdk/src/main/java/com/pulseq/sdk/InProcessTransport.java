@@ -1,8 +1,16 @@
 package com.pulseq.sdk;
 
-import com.pulseq.core.*;
+import com.pulseq.core.Dispatcher;
+import com.pulseq.core.Message;
+import com.pulseq.core.QueueManager;
+import com.pulseq.core.Reason;
+
 import java.util.UUID;
 
+/**
+ * Embedded transport: the client and the broker share the same JVM, so operations are
+ * direct method calls. Useful for testing and for the SDK's embedded-server mode.
+ */
 public class InProcessTransport implements ClientTransport {
     private final QueueManager queueManager;
     private final Dispatcher dispatcher;
@@ -13,14 +21,21 @@ public class InProcessTransport implements ClientTransport {
     }
 
     @Override
-    public void publish(String topic, byte[] payload) {
-        Message message = new Message(UUID.randomUUID().toString(), topic, payload);
+    public String publish(String topic, byte[] payload) {
+        String id = UUID.randomUUID().toString();
+        Message message = new Message(id, topic, payload);
         queueManager.publish(topic, message);
+        return id;
     }
 
     @Override
     public void subscribe(String topic, MessageHandler handler) {
-        dispatcher.subscribe(topic, handler::onMessage);
+        subscribe(topic, null, handler);
+    }
+
+    @Override
+    public void subscribe(String topic, String groupId, MessageHandler handler) {
+        dispatcher.subscribe(topic, groupId, handler::onMessage);
     }
 
     @Override
