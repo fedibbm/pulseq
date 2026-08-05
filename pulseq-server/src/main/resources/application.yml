@@ -1,0 +1,30 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: pulseq-server
+
+pulseq:
+  capacity: 1000
+  visibility-timeout-ms: 30000
+  retry-base-delay-ms: 500
+  max-retry-delay-ms: 60000
+  max-retries: 3
+  consumer-threads: 8
+  timeout-check-rate-ms: 1000
+  store: memory
+  postgres-url: jdbc:postgresql://localhost:5432/pulseq
+  postgres-user: pulseq
+  postgres-password: pulseq
+  # Directory containing the built Angular dashboard. Resolved relative to the working
+  # directory, or absolute (e.g. /app/dashboard in Docker). Optional: when the directory
+  # is missing the server simply serves no dashboard.
+  dashboard-path: ../pulseq-dashboard/dist/pulseq-dashboard/browser
+  # Purge completed messages (acknowledged/dead-lettered/expired) older than this. 0 disables.
+  retention-hours: 24
+  retention-sweep-rate-ms: 60000
+
+logging:
+  level:
+    com.pulseq: INFO
