@@ -1,0 +1,134 @@
+<header>
+  <div class="brand">
+    <span class="logo">PulseQ</span>
+    <span class="tagline">message broker dashboard</span>
+  </div>
+  <div class="controls">
+    <label class="status" [class.down]="health.status !== 'UP'">
+      <span class="dot"></span>
+      {{ health.status }}
+    </label>
+    <label>
+      <input type="checkbox" [(ngModel)]="autoRefresh" (ngModelChange)="onAutoRefreshChange()" />
+      auto
+    </label>
+    <select [(ngModel)]="refreshMs" (ngModelChange)="onRefreshMsChange()" [disabled]="!autoRefresh">
+      <option [ngValue]="1000">1s</option>
+      <option [ngValue]="2000">2s</option>
+      <option [ngValue]="5000">5s</option>
+    </select>
+    <button (click)="refresh()" title="refresh now">⟳</button>
+    <span class="updated" *ngIf="lastUpdated">updated {{ lastUpdated.toLocaleTimeString() }}</span>
+  </div>
+</header>
+
+<main>
+  <section class="cards">
+    <div class="card accent">
+      <span class="label">In queue</span>
+      <span class="value">{{ totals().inQueue }}</span>
+    </div>
+    <div class="card">
+      <span class="label">Published</span>
+      <span class="value">{{ totals().published }}</span>
+    </div>
+    <div class="card">
+      <span class="label">Acknowledged</span>
+      <span class="value">{{ totals().acked }}</span>
+    </div>
+    <div class="card warn">
+      <span class="label">Dead-lettered</span>
+      <span class="value">{{ totals().deadLettered }}</span>
+    </div>
+    <div class="card">
+      <span class="label">Retried</span>
+      <span class="value">{{ totals().retried }}</span>
+    </div>
+    <div class="card">
+      <span class="label">Expired</span>
+      <span class="value">{{ totals().expired }}</span>
+    </div>
+  </section>
+
+  <section class="panel publish">
+    <h2>Publish a test message</h2>
+    <form #f="ngForm" (ngSubmit)="publish()">
+      <input name="topic" [(ngModel)]="publishTopic" placeholder="topic" />
+      <input name="payload" [(ngModel)]="publishPayload" placeholder="payload" required />
+      <input name="maxRetries" type="number" [(ngModel)]="publishMaxRetries" placeholder="maxRetries" />
+      <input name="ttl" type="number" [(ngModel)]="publishTtlMillis" placeholder="ttlMillis (0 = none)" />
+      <button type="submit" [disabled]="f.invalid">Publish</button>
+    </form>
+    <div class="publish-result">
+      <span *ngIf="lastPublishId" class="ok">published → {{ lastPublishId }}</span>
+      <span *ngIf="publishError" class="err">{{ publishError }}</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Topics</h2>
+    <div *ngIf="rows.length === 0" class="empty">No topics yet — publish or subscribe to create one.</div>
+    <table *ngIf="rows.length > 0">
+      <thead>
+        <tr>
+          <th>Topic</th>
+          <th>Depth</th>
+          <th class="spark">Depth</th>
+          <th>Published</th>
+          <th class="spark">Published</th>
+          <th>Acked</th>
+          <th>Retried</th>
+          <th>Dead-lettered</th>
+          <th>Expired</th>
+          <th>Rejected</th>
+          <th>Dead-letter</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let row of rows">
+          <td class="topic">{{ row.topic }}</td>
+          <td class="num" [class.hot]="row.depth > 0">{{ row.depth }}</td>
+          <td class="spark"><app-sparkline [values]="depthSparkline(row.topic)"></app-sparkline></td>
+          <td class="num">{{ row.published }}</td>
+          <td class="spark"><app-sparkline [values]="publishedSparkline(row.topic)"></app-sparkline></td>
+          <td class="num">{{ row.acknowledged }}</td>
+          <td class="num">{{ row.retried }}</td>
+          <td class="num warn" [class.zero]="row.deadLettered === 0">{{ row.deadLettered }}</td>
+          <td class="num">{{ row.expired }}</td>
+          <td class="num">{{ row.rejected }}</td>
+          <td>
+            <button class="small" (click)="toggleDlq(row.topic)" [disabled]="dlqBusy.get(row.topic)">
+              {{ dlqOpen.get(row.topic) ? 'hide' : 'view' }}
+            </button>
+            <button class="small" (click)="replayDlq(row.topic)" [disabled]="row.deadLettered === 0 || dlqBusy.get(row.topic)">
+              replay
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div *ngFor="let row of rows" class="dlq" [hidden]="!dlqOpen.get(row.topic)">
+      <h3>Dead-lettered messages — {{ row.topic }}</h3>
+      <div *ngIf="(dlqEntries.get(row.topic) ?? []).length === 0" class="empty">Empty.</div>
+      <table *ngIf="(dlqEntries.get(row.topic) ?? []).length > 0">
+        <thead>
+          <tr><th>id</th><th>payload</th><th>attempts</th><th>maxRetries</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let entry of dlqEntries.get(row.topic)">
+            <td class="mono">{{ entry.id }}</td>
+            <td class="mono">{{ dlqPreview(entry.payload) }}</td>
+            <td class="num">{{ entry.deliveryAttempts }}</td>
+            <td class="num">{{ entry.maxRetries }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span *ngIf="health.topics.length">{{ health.topics.length }} topic(s)</span>
+  <span *ngIf="!health.topics.length">broker unreachable — is pulseq-server running?</span>
+</footer>
