@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: pulseq
+      POSTGRES_USER: pulseq
+      POSTGRES_PASSWORD: pulseq
+    ports:
+      - "5432:5432"
+    volumes:
+      - pulseq-pgdata:/var/lib/postgresql/data
+      - ./pulseq-core/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulseq -d pulseq"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  server:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PULSEQ_STORE: postgres
+      PULSEQ_POSTGRES_URL: jdbc:postgresql://postgres:5432/pulseq
+      PULSEQ_POSTGRES_USER: pulseq
+      PULSEQ_POSTGRES_PASSWORD: pulseq
+      PULSEQ_DASHBOARD_PATH: /app/dashboard
+    ports:
+      - "8080:8080"
+
+volumes:
+  pulseq-pgdata:

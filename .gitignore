@@ -3,5 +3,6 @@
 md_files/
 *.class
 out/
-pulseq-core/target/
-pulseq-sdk/target/
+target/
+pulseq-dashboard/node_modules/
+pulseq-dashboard/dist/
