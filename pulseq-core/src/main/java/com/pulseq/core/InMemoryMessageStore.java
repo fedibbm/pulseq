@@ -47,6 +47,9 @@ public class InMemoryMessageStore implements MessageStore {
                 result.add(message);
             }
         }
+        result.sort(java.util.Comparator
+                .comparingLong(Message::getPublishedAt)
+                .thenComparing(Message::getId));
         return result;
     }
 

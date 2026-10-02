@@ -57,6 +57,28 @@ public class PulseQClient {
         return transport.publish(topic, payload.getBytes(StandardCharsets.UTF_8));
     }
 
+    /**
+     * Publishes a byte payload with a producer-assigned id, making the publish idempotent inside
+     * the broker's dedup window. Retrying with the same id raises {@link DuplicatePublishException}
+     * instead of storing the message twice, so a caller can retry an uncertain publish safely.
+     *
+     * @param topic     the topic to publish to
+     * @param payload   the raw byte payload
+     * @param messageId the producer-assigned id; must be stable across retries of the same message
+     * @return the message id
+     */
+    public String publish(String topic, byte[] payload, String messageId) {
+        return transport.publish(topic, payload, messageId);
+    }
+
+    /**
+     * Publishes a UTF-8 string payload with a producer-assigned id. See
+     * {@link #publish(String, byte[], String)}.
+     */
+    public String publish(String topic, String payload, String messageId) {
+        return transport.publish(topic, payload.getBytes(StandardCharsets.UTF_8), messageId);
+    }
+
     public void subscribe(String topic, MessageHandler handler) {
         transport.subscribe(topic, handler);
     }

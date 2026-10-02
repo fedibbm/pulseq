@@ -23,6 +23,8 @@ public class BrokerConfigProperties {
     private String dashboardPath = "../pulseq-dashboard/dist/pulseq-dashboard/browser";
     private double retentionHours = 24;
     private long retentionSweepRateMillis = 60_000;
+    private long publishTimeoutMillis = 2_000;
+    private int storePoolSize = 10;
 
     public BrokerConfig toBrokerConfig() {
         return new BrokerConfig(capacity, visibilityTimeoutMillis, retryBaseDelayMillis,
@@ -70,6 +72,12 @@ public class BrokerConfigProperties {
 
     public long getRetentionSweepRateMillis() { return retentionSweepRateMillis; }
     public void setRetentionSweepRateMillis(long retentionSweepRateMillis) { this.retentionSweepRateMillis = retentionSweepRateMillis; }
+
+    public long getPublishTimeoutMillis() { return publishTimeoutMillis; }
+    public void setPublishTimeoutMillis(long publishTimeoutMillis) { this.publishTimeoutMillis = publishTimeoutMillis; }
+
+    public int getStorePoolSize() { return storePoolSize; }
+    public void setStorePoolSize(int storePoolSize) { this.storePoolSize = storePoolSize; }
 
     public long getRetentionMillis() {
         return (long) (retentionHours * 3_600_000);

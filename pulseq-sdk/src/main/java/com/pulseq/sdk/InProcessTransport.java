@@ -22,10 +22,14 @@ public class InProcessTransport implements ClientTransport {
 
     @Override
     public String publish(String topic, byte[] payload) {
-        String id = UUID.randomUUID().toString();
-        Message message = new Message(id, topic, payload);
+        return publish(topic, payload, UUID.randomUUID().toString());
+    }
+
+    @Override
+    public String publish(String topic, byte[] payload, String messageId) {
+        Message message = new Message(messageId, topic, payload);
         queueManager.publish(topic, message);
-        return id;
+        return messageId;
     }
 
     @Override

@@ -18,6 +18,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -56,19 +57,42 @@ public class WebSocketTransport implements ClientTransport {
 
     @Override
     public String publish(String topic, byte[] payload) {
+        return sendPublish(topic, payload, null);
+    }
+
+    @Override
+    public String publish(String topic, byte[] payload, String messageId) {
+        return sendPublish(topic, payload, messageId);
+    }
+
+    private String sendPublish(String topic, byte[] payload, String messageId) {
         try {
-            String body = JSON.writeValueAsString(Map.of("payload", new String(payload, StandardCharsets.UTF_8)));
-            HttpRequest request = HttpRequest.newBuilder()
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("payload", new String(payload, StandardCharsets.UTF_8));
+            if (messageId != null) {
+                request.put("messageId", messageId);
+            }
+            String body = JSON.writeValueAsString(request);
+            HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(httpBase + "/publish/" + topic))
                     .timeout(Duration.ofSeconds(10))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = http.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
+                if (response.statusCode() == 409) {
+                    throw new DuplicatePublishException(
+                            "message id already published for topic '" + topic + "'");
+                }
+                if (response.statusCode() == 429) {
+                    throw new BackpressureException("topic '" + topic + "' is full");
+                }
                 throw new RuntimeException("Publish failed: HTTP " + response.statusCode() + " " + response.body());
             }
             return JSON.readTree(response.body()).path("messageId").asText(null);
+        } catch (DuplicatePublishException | BackpressureException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Publish failed for topic '" + topic + "'", e);
         }

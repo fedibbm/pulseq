@@ -19,9 +19,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class PostgresMessageStoreIT {
 
-    private static final String URL = "jdbc:postgresql://localhost:5432/pulseq";
-    private static final String USER = "pulseq";
-    private static final String PASSWORD = "pulseq";
+    private static final String URL = System.getProperty("pulseq.it.jdbcUrl",
+            "jdbc:postgresql://localhost:5432/pulseq");
+    private static final String USER = System.getProperty("pulseq.it.user", "pulseq");
+    private static final String PASSWORD = System.getProperty("pulseq.it.password", "pulseq");
 
     private static boolean databaseAvailable;
 
@@ -34,6 +35,35 @@ class PostgresMessageStoreIT {
             databaseAvailable = true;
         } catch (Exception e) {
             databaseAvailable = false;
+        }
+    }
+
+    @Test
+    void loadAllAvailablePreservesPublishOrder() throws Exception {
+        assumeTrue(databaseAvailable, "PostgreSQL not reachable; skipping integration test");
+        try (PostgresMessageStore store = new PostgresMessageStore(URL, USER, PASSWORD)) {
+            // Insert with distinct, increasing publish times to make the expected order unambiguous.
+            for (int i = 0; i < 5; i++) {
+                Message m = new Message("it-order-" + i, "ordered", Payloads.toBytes("m" + i), 5, 0);
+                store.save(m);
+                try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
+                     java.sql.PreparedStatement stmt = conn.prepareStatement(
+                             "UPDATE messages SET published_at = ? WHERE id = ?")) {
+                    stmt.setLong(1, 1_700_000_000_000L + i);
+                    stmt.setString(2, "it-order-" + i);
+                    stmt.executeUpdate();
+                }
+            }
+
+            List<Message> loaded = store.loadAllAvailable().stream()
+                    .filter(m -> m.getId().startsWith("it-order-"))
+                    .toList();
+
+            assertEquals(5, loaded.size());
+            for (int i = 0; i < 5; i++) {
+                assertEquals("it-order-" + i, loaded.get(i).getId(),
+                        "recovery must restore messages in publish order to preserve FIFO");
+            }
         }
     }
 

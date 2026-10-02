@@ -2,9 +2,11 @@ package com.pulseq.core;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.TimeUnit;
@@ -39,6 +41,8 @@ public class MessageQueue {
     private final LinkedList<Message> messages = new LinkedList<>();
     private final Map<String, Message> inFlight = new HashMap<>();
     private final DelayQueue<DelayedMessage> delays = new DelayQueue<>();
+    private final Set<String> liveTimers = new HashSet<>();
+    private final Set<String> cancelledTimers = new HashSet<>();
     private final DeadLetterQueue deadLetterQueue;
     private final MessageStore store;
     private final BrokerMetrics metrics;
@@ -102,6 +106,34 @@ public class MessageQueue {
     }
 
     /**
+     * Restores a message during startup recovery.
+     *
+     * <p>Unlike {@link #enqueue(Message)} this never waits for capacity. {@code recover()} runs on
+     * the application startup thread before any consumer thread exists, so a topic holding more
+     * unfinished messages than its capacity would block forever on {@code notFull.await()} and the
+     * application would never finish starting. {@link #recover()} pre-checks the counts and fails
+     * fast instead, so the restore here is only reached when the messages provably fit.</p>
+     *
+     * @throws IllegalStateException if more messages would be restored than the capacity allows
+     */
+    void restore(Message message) {
+        lock.lock();
+        try {
+            if (messages.size() >= capacity) {
+                throw new IllegalStateException("topic '" + topic + "' has more unfinished messages ("
+                        + (messages.size() + 1) + ") than its capacity (" + capacity
+                        + "); raise the capacity before starting the broker");
+            }
+            store.save(message);
+            messages.addLast(message);
+            notEmpty.signal();
+            metrics.recordPublish(topic);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
      * Removes and returns the next available message, blocking until one arrives.
      */
     Message dequeue() {
@@ -116,7 +148,7 @@ public class MessageQueue {
             message.setStatus(MessageStatus.IN_FLIGHT);
             message.setVisibilityExpiresAt(expiresAt);
             this.inFlight.put(message.getId(), message);
-            this.delays.add(new DelayedMessage(message, expiresAt));
+            scheduleTimer(message, expiresAt);
             notFull.signal();
             return message;
         } catch (InterruptedException e) {
@@ -191,6 +223,11 @@ public class MessageQueue {
             delays.drainTo(due);
             boolean requeued = false;
             for (DelayedMessage delayed : due) {
+                String id = delayed.message().getId();
+                liveTimers.remove(id);
+                if (cancelledTimers.remove(id)) {
+                    continue;
+                }
                 Message message = delayed.message();
                 if (message.getRetryAt() > 0) {
                     requeueAvailable(message);
@@ -276,7 +313,7 @@ public class MessageQueue {
         removeFromDelays(message.getId());
         long delay = backoffDelay(message.getDeliveryAttempts());
         message.setRetryAt(System.currentTimeMillis() + delay);
-        delays.add(new DelayedMessage(message, message.getRetryAt()));
+        scheduleTimer(message, message.getRetryAt());
         metrics.recordRetry(topic);
     }
 
@@ -314,8 +351,26 @@ public class MessageQueue {
         return message.getMaxRetries() > 0 ? message.getMaxRetries() : defaultMaxRetries;
     }
 
+    /**
+     * Cancels the pending visibility/retry timer for a message in constant time.
+     *
+     * <p>{@link DelayQueue#remove(Object)} delegates to {@code PriorityQueue.indexOf}, a linear
+     * equals-scan over the whole queue, so cancelling via the queue directly would make every ack
+     * an O(n) sweep while the topic lock is held. Instead cancellation only records the id as
+     * cancelled ({@code O(1)}) and {@link #requeueTimedOut()} skips the stale entry when it
+     * eventually drains. The queue holds at most one extra timer per in-flight message, and every
+     * timer is dropped on the next sweep.</p>
+     */
     private void removeFromDelays(String messageId) {
-        delays.remove(new DelayedMessage(messageId));
+        if (liveTimers.remove(messageId)) {
+            cancelledTimers.add(messageId);
+        }
+    }
+
+    private void scheduleTimer(Message message, long deadlineMillis) {
+        liveTimers.add(message.getId());
+        cancelledTimers.remove(message.getId());
+        delays.add(new DelayedMessage(message, deadlineMillis));
     }
 
     public DeadLetterQueue getDeadLetterQueue() { return deadLetterQueue; }
@@ -342,7 +397,12 @@ public class MessageQueue {
 
     /** Number of pending visibility/retry timers (cheap check used by the timeout sweeper). */
     public int delayedCount() {
-        return delays.size();
+        lock.lock();
+        try {
+            return liveTimers.size();
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**
@@ -358,12 +418,6 @@ public class MessageQueue {
             this.message = message;
             this.deadlineMillis = deadlineMillis;
             this.id = message.getId();
-        }
-
-        DelayedMessage(String id) {
-            this.message = null;
-            this.deadlineMillis = -1;
-            this.id = id;
         }
 
         Message message() { return message; }
