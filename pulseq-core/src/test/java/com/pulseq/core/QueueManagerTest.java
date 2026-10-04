@@ -21,7 +21,40 @@ class QueueManagerTest extends BrokerTestSupport {
         assertTrue(qm.publish("t", m));
         assertFalse(qm.publish("t", m), "duplicate id must be dropped");
         assertEquals(1, qm.getQueue("t").size());
-        assertEquals(1, qm.getMetrics().getRejected("t"));
+        assertEquals(1, qm.getMetrics().getDuplicate("t"));
+        assertEquals(0, qm.getMetrics().getRejected("t"),
+                "a duplicate is not a REJECTED nack and must not share its counter");
+    }
+
+    @Test
+    void offerReportsQueueFullSeparatelyFromDuplicate() throws InterruptedException {
+        QueueManager qm = new QueueManager(new InMemoryMessageStore(),
+                new BrokerConfig(1, 100, 50, 5_000, 3, 8, 1_000));
+        assertEquals(QueueManager.PublishResult.ACCEPTED,
+                qm.tryOffer("t", message("1", "t"), 100, java.util.concurrent.TimeUnit.MILLISECONDS));
+        assertEquals(QueueManager.PublishResult.QUEUE_FULL,
+                qm.tryOffer("t", message("2", "t"), 100, java.util.concurrent.TimeUnit.MILLISECONDS));
+        assertEquals(1, qm.getMetrics().getBackpressure("t"));
+
+        // A publish refused for backpressure must not burn the dedup slot, so the same id can
+        // still be accepted once capacity frees up.
+        Message retry = message("2", "t");
+        qm.getQueue("t").dequeue();
+        assertEquals(QueueManager.PublishResult.ACCEPTED,
+                qm.tryOffer("t", retry, 100, java.util.concurrent.TimeUnit.MILLISECONDS));
+    }
+
+    @Test
+    void recoverRefusesToBlockWhenUnfinishedMessagesExceedCapacity() {
+        InMemoryMessageStore store = new InMemoryMessageStore();
+        for (int i = 0; i < 3; i++) {
+            store.save(message(String.valueOf(i), "t"));
+        }
+        QueueManager qm = new QueueManager(store, new BrokerConfig(1, 100, 50, 5_000, 3, 8, 1_000));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, qm::recover,
+                "recovery must fail fast instead of blocking forever on a full queue");
+        assertTrue(thrown.getMessage().contains("capacity"), thrown.getMessage());
     }
 
     @Test

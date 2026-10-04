@@ -18,6 +18,17 @@ public interface ClientTransport {
     String publish(String topic, byte[] payload);
 
     /**
+     * Publishes a message with a caller-supplied id, which makes the publish idempotent inside
+     * the broker's dedup window: retrying with the same id is rejected rather than stored twice.
+     *
+     * @param topic     the topic to publish to (auto-created on the broker)
+     * @param payload   the raw byte payload
+     * @param messageId the producer-assigned message id
+     * @return the id of the message
+     */
+    String publish(String topic, byte[] payload, String messageId);
+
+    /**
      * Subscribes to a topic. Every subscriber receives a copy of each message (fan-out).
      *
      * @param topic   the topic to consume

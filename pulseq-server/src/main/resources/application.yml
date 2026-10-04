@@ -13,6 +13,11 @@ pulseq:
   max-retries: 3
   consumer-threads: 8
   timeout-check-rate-ms: 1000
+  # How long a REST publish waits for room in a full topic before answering 429.
+  publish-timeout-ms: 2000
+  # JDBC connections kept open by the PostgreSQL store. Store calls happen while holding the
+  # per-topic queue lock, so a pool avoids a TCP+auth handshake on every state transition.
+  store-pool-size: 10
   store: memory
   postgres-url: jdbc:postgresql://localhost:5432/pulseq
   postgres-user: pulseq

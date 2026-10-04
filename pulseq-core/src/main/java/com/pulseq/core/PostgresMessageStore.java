@@ -1,22 +1,45 @@
 package com.pulseq.core;
 
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+
+import javax.sql.DataSource;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
-public class PostgresMessageStore implements MessageStore {
-    private final String url;
-    private final String user;
-    private final String password;
+public class PostgresMessageStore implements MessageStore, AutoCloseable {
+
+    private static final int DEFAULT_POOL_SIZE = 10;
+    private final DataSource dataSource;
 
     public PostgresMessageStore(String url, String user, String password) {
-        this.url = url;
-        this.user = user;
-        this.password = password;
+        this(url, user, password, DEFAULT_POOL_SIZE);
+    }
+
+    public PostgresMessageStore(String url, String user, String password, int poolSize) {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(url);
+        config.setUsername(user);
+        config.setPassword(password);
+        config.setMaximumPoolSize(Math.max(1, poolSize));
+        config.setPoolName("pulseq-store");
+        this.dataSource = new HikariDataSource(config);
     }
 
     private Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(url, user, password);
+        return dataSource.getConnection();
+    }
+
+    @Override
+    public void close() {
+        if (dataSource instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to close message store", e);
+            }
+        }
     }
 
     @Override
@@ -83,7 +106,7 @@ public class PostgresMessageStore implements MessageStore {
 
     @Override
     public List<Message> loadAllAvailable() {
-        String sql = "SELECT * FROM messages WHERE status IN (?, ?)";
+        String sql = "SELECT * FROM messages WHERE status IN (?, ?) ORDER BY published_at, id";
         List<Message> result = new ArrayList<>();
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {

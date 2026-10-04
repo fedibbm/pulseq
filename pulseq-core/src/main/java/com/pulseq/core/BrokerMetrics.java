@@ -19,6 +19,8 @@ public class BrokerMetrics {
     private final Map<String, AtomicLong> retried = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> expired = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> rejected = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> duplicate = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> backpressure = new ConcurrentHashMap<>();
 
     void recordPublish(String topic) {
         queueDepth.computeIfAbsent(topic, k -> new AtomicLong()).incrementAndGet();
@@ -48,6 +50,16 @@ public class BrokerMetrics {
         rejected.computeIfAbsent(topic, k -> new AtomicLong()).incrementAndGet();
     }
 
+    /** Messages dropped because their id was already seen inside the dedup window. */
+    void recordDuplicate(String topic) {
+        duplicate.computeIfAbsent(topic, k -> new AtomicLong()).incrementAndGet();
+    }
+
+    /** Publishes refused because the topic queue stayed full for the whole backpressure window. */
+    void recordBackpressure(String topic) {
+        backpressure.computeIfAbsent(topic, k -> new AtomicLong()).incrementAndGet();
+    }
+
     public long getDepth(String topic) { return count(queueDepth, topic); }
     public long getPublished(String topic) { return count(published, topic); }
     public long getAcknowledged(String topic) { return count(acknowledged, topic); }
@@ -55,6 +67,8 @@ public class BrokerMetrics {
     public long getRetried(String topic) { return count(retried, topic); }
     public long getExpired(String topic) { return count(expired, topic); }
     public long getRejected(String topic) { return count(rejected, topic); }
+    public long getDuplicate(String topic) { return count(duplicate, topic); }
+    public long getBackpressure(String topic) { return count(backpressure, topic); }
 
     private static long count(Map<String, AtomicLong> map, String topic) {
         AtomicLong value = map.get(topic);
@@ -63,7 +77,8 @@ public class BrokerMetrics {
 
     public MetricsSnapshot snapshot() {
         return new MetricsSnapshot(snapshotMap(queueDepth), snapshotMap(published), snapshotMap(acknowledged),
-                snapshotMap(deadLettered), snapshotMap(retried), snapshotMap(expired), snapshotMap(rejected));
+                snapshotMap(deadLettered), snapshotMap(retried), snapshotMap(expired), snapshotMap(rejected),
+                snapshotMap(duplicate), snapshotMap(backpressure));
     }
 
     private static Map<String, Long> snapshotMap(Map<String, AtomicLong> map) {

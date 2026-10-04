@@ -26,14 +26,15 @@ public class PulseQServer {
         SpringApplication.run(PulseQServer.class, args);
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     MessageStore messageStore(BrokerConfigProperties properties) {
         if ("postgres".equalsIgnoreCase(properties.getStore())) {
             if (properties.getPostgresUrl() == null || properties.getPostgresUrl().isBlank()) {
                 throw new IllegalStateException("pulseq.postgres-url is required when pulseq.store=postgres");
             }
             return new PostgresMessageStore(properties.getPostgresUrl(),
-                    properties.getPostgresUser(), properties.getPostgresPassword());
+                    properties.getPostgresUser(), properties.getPostgresPassword(),
+                    properties.getStorePoolSize());
         }
         return new InMemoryMessageStore();
     }

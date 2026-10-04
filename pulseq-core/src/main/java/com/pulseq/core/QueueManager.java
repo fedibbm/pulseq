@@ -1,6 +1,7 @@
 package com.pulseq.core;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,7 +39,7 @@ public class QueueManager {
      */
     public boolean publish(String topic, Message message) {
         if (!acceptNewId(message.getId())) {
-            metrics.recordRejected(topic);
+            metrics.recordDuplicate(topic);
             return false;
         }
         createQueue(topic).enqueue(message);
@@ -51,11 +52,37 @@ public class QueueManager {
      * @return false when the message was a duplicate or the queue stayed full
      */
     public boolean offer(String topic, Message message, long timeout, java.util.concurrent.TimeUnit unit) {
+        return tryOffer(topic, message, timeout, unit) == PublishResult.ACCEPTED;
+    }
+
+    /**
+     * Bounded publish that distinguishes why a message was not accepted.
+     *
+     * <p>Callers that need to map the outcome onto an HTTP status (for example a REST API) need
+     * to tell a duplicate id ({@code 409}) apart from a full queue ({@code 429}); the boolean
+     * {@link #offer} collapses both into {@code false}.</p>
+     *
+     * @return {@link PublishResult#ACCEPTED}, {@link PublishResult#DUPLICATE} when the id was seen
+     *         inside the dedup window, or {@link PublishResult#QUEUE_FULL} when the topic stayed full
+     */
+    public PublishResult tryOffer(String topic, Message message, long timeout,
+                                  java.util.concurrent.TimeUnit unit) {
         if (!acceptNewId(message.getId())) {
-            metrics.recordRejected(topic);
-            return false;
+            metrics.recordDuplicate(topic);
+            return PublishResult.DUPLICATE;
         }
-        return createQueue(topic).offer(message, timeout, unit);
+        MessageQueue queue = createQueue(topic);
+        if (queue.offer(message, timeout, unit)) {
+            return PublishResult.ACCEPTED;
+        }
+        seenMessageIds.remove(message.getId());
+        metrics.recordBackpressure(topic);
+        return PublishResult.QUEUE_FULL;
+    }
+
+    /** Outcome of a bounded publish attempt. */
+    public enum PublishResult {
+        ACCEPTED, DUPLICATE, QUEUE_FULL
     }
 
     private boolean acceptNewId(String messageId) {
@@ -95,11 +122,32 @@ public class QueueManager {
      * Re-queues all messages that survived a restart (AVAILABLE or IN_FLIGHT), restoring
      * them to {@link MessageStatus#AVAILABLE}, and rebuilds each topic's dead-letter queue
      * from the dead-lettered messages that survived the restart.
+     *
+     * <p>Runs before any consumer thread starts, so it must never block: a topic whose
+     * unfinished messages exceed its configured capacity would otherwise wait forever and the
+     * application would never finish starting. Capacity overflow is reported as an
+     * {@link IllegalStateException} instead.</p>
+     *
+     * @throws IllegalStateException when a topic holds more unfinished messages than its capacity
      */
     public void recover() {
-        for (Message message : store.loadAllAvailable()) {
+        Map<String, Integer> perTopic = new LinkedHashMap<>();
+        List<Message> survivors = store.loadAllAvailable();
+        for (Message message : survivors) {
+            perTopic.merge(message.getTopic(), 1, Integer::sum);
+        }
+        for (Map.Entry<String, Integer> entry : perTopic.entrySet()) {
+            int capacity = config.getCapacity();
+            if (entry.getValue() > capacity) {
+                throw new IllegalStateException("topic '" + entry.getKey() + "' has "
+                        + entry.getValue() + " unfinished messages but its capacity is " + capacity
+                        + "; raise the capacity or drain the topic before restarting");
+            }
+        }
+        for (Message message : survivors) {
             message.setStatus(MessageStatus.AVAILABLE);
-            publish(message.getTopic(), message);
+            seenMessageIds.putIfAbsent(message.getId(), System.currentTimeMillis());
+            createQueue(message.getTopic()).restore(message);
         }
         for (Message message : store.loadDeadLettered()) {
             createQueue(message.getTopic()).getDeadLetterQueue().add(message);

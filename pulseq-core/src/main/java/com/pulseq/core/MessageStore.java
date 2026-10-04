@@ -23,4 +23,11 @@ public interface MessageStore {
      * @return number of rows removed
      */
     int sweepCompleted(long cutoffMillis);
+
+    /**
+     * Releases resources held by the store. The default implementation does nothing, which suits
+     * stores that hold no external resources; pooled stores override it to close the pool.
+     */
+    default void close() {
+    }
 }

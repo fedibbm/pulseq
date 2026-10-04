@@ -59,4 +59,42 @@ class PublishControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.queueDepths").exists());
     }
+
+    @Test
+    void ttlAndMaxRetriesAreCombinedRatherThanDroppingEither() throws Exception {
+        mvc.perform(post("/publish/policy")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"payload\":\"x\",\"maxRetries\":7,\"ttlMillis\":60000}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.maxRetries").value(7))
+                .andExpect(jsonPath("$.ttlMillis").value(60000));
+    }
+
+    @Test
+    void callerSuppliedIdMakesPublishIdempotent() throws Exception {
+        String body = "{\"payload\":\"once\",\"messageId\":\"order-42\"}";
+
+        mvc.perform(post("/publish/idem").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        mvc.perform(post("/publish/idem").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
+
+        assertEquals(1, queueManager.getQueue("idem").size(),
+                "a retried publish with the same id must be stored once");
+        assertEquals(1, queueManager.getMetrics().getDuplicate("idem"));
+    }
+
+    @Test
+    void brokerAssignedIdStillWorksWhenCallerOmitsOne() throws Exception {
+        mvc.perform(post("/publish/auto").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"payload\":\"a\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/publish/auto").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"payload\":\"a\"}"))
+                .andExpect(status().isOk());
+
+        assertEquals(2, queueManager.getQueue("auto").size(),
+                "without a caller id each publish is a distinct message");
+    }
 }
