@@ -6,6 +6,8 @@ export interface Metrics {
   retried: Record<string, number>;
   expired: Record<string, number>;
   rejected: Record<string, number>;
+  duplicate: Record<string, number>;
+  backpressure: Record<string, number>;
 }
 
 export interface Health {
@@ -37,4 +39,6 @@ export interface TopicRow {
   retried: number;
   expired: number;
   rejected: number;
+  duplicate: number;
+  backpressure: number;
 }
