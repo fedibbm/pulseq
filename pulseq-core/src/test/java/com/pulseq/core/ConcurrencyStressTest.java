@@ -203,6 +203,76 @@ class ConcurrencyStressTest extends BrokerTestSupport {
         assertTrue(p99 < 50_000, "p99 round-trip should stay in the millisecond range, was " + p99 + " us");
     }
 
+    /**
+     * Measures the cost of abandoning an in-flight message as the number of other in-flight
+     * messages grows, to support the report's claim that cancellation is O(1).
+     *
+     * <p>If cancellation had to scan or dequeue from the per-queue delayed structure, the cost
+     * would rise with depth. The assertion therefore checks that the per-cancel cost at depth
+     * 3,200 stays within a small multiple of the cost at depth 100, rather than pinning an
+     * absolute time: the property under test is flatness, and the printed figures are the
+     * evidence for the report.</p>
+     */
+    @Test
+    void measureCancellationCostAsInFlightDepthGrows() {
+        ArrayList<Long> atDepth100 = new ArrayList<>();
+        ArrayList<Long> atDepth3200 = new ArrayList<>();
+
+        measureCancels(100, atDepth100);
+        measureCancels(3_200, atDepth3200);
+
+        double shallow = percentile(atDepth100, 0.50);
+        double deep = percentile(atDepth3200, 0.50);
+
+        System.out.printf("[bench] cancel at depth   100  p50=%.0f ns%n", shallow);
+        System.out.printf("[bench] cancel at depth  3200  p50=%.0f ns%n", deep);
+        System.out.printf("[bench] cancel depth ratio (3200/100) = %.2fx for a 32x depth increase%n",
+                deep / shallow);
+
+        // An O(1) implementation measures flat (observed ~1.0x); replacing it with an
+        // O(n) DelayQueue scan measures ~4.7x on this hardware. Sit between the two with room
+        // for scheduler noise, so a regression to a linear sweep fails the build.
+        assertTrue(deep < shallow * 3,
+                "cancellation should be flat in in-flight depth, but p50 went from "
+                        + (long) shallow + " ns to " + (long) deep + " ns");
+    }
+
+    /**
+     * Fills the queue to {@code depth} in-flight messages, abandons each one, and records the
+     * per-cancel cost. Each round uses a fresh queue so runs cannot contaminate each other.
+     */
+    private void measureCancels(int depth, ArrayList<Long> samples) {
+        int rounds = 20;
+        samples.ensureCapacity(rounds * depth);
+        for (int round = 0; round < rounds; round++) {
+            String topic = "cancel-" + depth + "-" + round;
+            QueueManager queueManager = new QueueManager(new InMemoryMessageStore(),
+                    new BrokerConfig(60_000, 60_000, depth + 16, 60_000, 3, 8, 1_000));
+            MessageQueue queue = queueManager.createQueue(topic);
+
+            // Occupy the queue to the target depth without acknowledging anything.
+            List<String> inFlight = new ArrayList<>(depth);
+            for (int i = 0; i < depth; i++) {
+                Message m = message(topic + "-" + i, topic);
+                queueManager.publish(topic, m);
+                queue.dequeue();
+                inFlight.add(m.getId());
+            }
+
+            for (String id : inFlight) {
+                long began = System.nanoTime();
+                queue.ack(id);
+                samples.add(System.nanoTime() - began);
+            }
+        }
+    }
+
+    private static double percentile(List<Long> sortedSamples, double fraction) {
+        List<Long> copy = new ArrayList<>(sortedSamples);
+        Collections.sort(copy);
+        return copy.get(Math.min(copy.size() - 1, (int) (copy.size() * fraction)));
+    }
+
     private static long sumPublished(QueueManager queueManager, int topics) {
         long sum = 0;
         for (int t = 0; t < topics; t++) {

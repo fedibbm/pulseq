@@ -3,6 +3,19 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-10-10]
+
+### Added
+- `WebSocketTransportReconnectTest`: reconnect and backoff behaviour of the SDK
+  transport, including a session that drops mid-stream.
+- `VisibilityTimeoutCheckerTest`: visibility timeouts, redelivery and
+  cancellation, including a stale timer that must not act on a replayed
+  message.
+- `ConcurrencyStressTest`: more competing-consumer and NACK scenarios.
+
+### Changed
+- `tools/bench.py`: corrected the latency method and refreshed `EVIDENCE.md`.
+
 ## [2026-10-06]
 
 ### Docs
