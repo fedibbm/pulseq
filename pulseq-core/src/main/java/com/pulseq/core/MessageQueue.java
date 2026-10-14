@@ -41,8 +41,15 @@ public class MessageQueue {
     private final LinkedList<Message> messages = new LinkedList<>();
     private final Map<String, Message> inFlight = new HashMap<>();
     private final DelayQueue<DelayedMessage> delays = new DelayQueue<>();
-    private final Set<String> liveTimers = new HashSet<>();
-    private final Set<String> cancelledTimers = new HashSet<>();
+    /**
+     * Id to the token of the timer currently considered live for that id. A message has at most one
+     * live timer at a time; a superseded timer keeps its own token, which is what lets the sweep
+     * tell a current timer from a stale one that happens to carry the same message id.
+     */
+    private final Map<String, Long> liveTimers = new HashMap<>();
+    /** Tokens of cancelled timers, skipped when their stale entry eventually drains. */
+    private final Set<Long> cancelledTimers = new HashSet<>();
+    private long timerToken;
     private final DeadLetterQueue deadLetterQueue;
     private final MessageStore store;
     private final BrokerMetrics metrics;
@@ -224,10 +231,16 @@ public class MessageQueue {
             boolean requeued = false;
             for (DelayedMessage delayed : due) {
                 String id = delayed.message().getId();
-                liveTimers.remove(id);
-                if (cancelledTimers.remove(id)) {
+                cancelledTimers.remove(delayed.token());
+                // Act only on this entry if it is still the live timer for its id. A stale entry
+                // (cancelled, or superseded by a later timer for a replayed message) is dropped.
+                // Read before removing: a stale entry must not unregister the live timer, since the
+                // live one may still be pending behind it in this same drain.
+                Long live = liveTimers.get(id);
+                if (live == null || live.longValue() != delayed.token()) {
                     continue;
                 }
+                liveTimers.remove(id);
                 Message message = delayed.message();
                 if (message.getRetryAt() > 0) {
                     requeueAvailable(message);
@@ -356,21 +369,24 @@ public class MessageQueue {
      *
      * <p>{@link DelayQueue#remove(Object)} delegates to {@code PriorityQueue.indexOf}, a linear
      * equals-scan over the whole queue, so cancelling via the queue directly would make every ack
-     * an O(n) sweep while the topic lock is held. Instead cancellation only records the id as
-     * cancelled ({@code O(1)}) and {@link #requeueTimedOut()} skips the stale entry when it
-     * eventually drains. The queue holds at most one extra timer per in-flight message, and every
-     * timer is dropped on the next sweep.</p>
+     * an O(n) sweep while the topic lock is held. Instead cancellation marks the current timer token
+     * as cancelled ({@code O(1)}) and {@link #requeueTimedOut()} drops the stale entry when it
+     * eventually drains. Each timer carries a unique token, so cancelling one timer for an id never
+     * affects a newer timer created for the same id (a replayed dead-lettered message, for
+     * instance). The queue holds at most one extra timer per in-flight message, reclaimed as the
+     * original deadline passes.</p>
      */
     private void removeFromDelays(String messageId) {
-        if (liveTimers.remove(messageId)) {
-            cancelledTimers.add(messageId);
+        Long token = liveTimers.remove(messageId);
+        if (token != null) {
+            cancelledTimers.add(token);
         }
     }
 
     private void scheduleTimer(Message message, long deadlineMillis) {
-        liveTimers.add(message.getId());
-        cancelledTimers.remove(message.getId());
-        delays.add(new DelayedMessage(message, deadlineMillis));
+        long token = ++timerToken;
+        liveTimers.put(message.getId(), token);
+        delays.add(new DelayedMessage(message, deadlineMillis, token));
     }
 
     public DeadLetterQueue getDeadLetterQueue() { return deadLetterQueue; }
@@ -406,21 +422,24 @@ public class MessageQueue {
     }
 
     /**
-     * A {@link Delayed} wrapper around a {@link Message}; equality is by message id so that
-     * timed-out entries can be removed when a message is acked or dead-lettered.
+     * A {@link Delayed} wrapper around a {@link Message}, ordered by deadline and identified by a
+     * unique token. Cancellation never removes an entry from the queue; it marks the token, and the
+     * sweep drops the entry when it drains.
      */
     private static final class DelayedMessage implements Delayed {
         private final Message message;
         private final long deadlineMillis;
-        private final String id;
+        private final long token;
 
-        DelayedMessage(Message message, long deadlineMillis) {
+        DelayedMessage(Message message, long deadlineMillis, long token) {
             this.message = message;
             this.deadlineMillis = deadlineMillis;
-            this.id = message.getId();
+            this.token = token;
         }
 
         Message message() { return message; }
+
+        long token() { return token; }
 
         @Override
         public long getDelay(TimeUnit unit) {
@@ -432,14 +451,7 @@ public class MessageQueue {
             return Long.compare(deadlineMillis, ((DelayedMessage) other).deadlineMillis);
         }
 
-        @Override
-        public boolean equals(Object o) {
-            return o instanceof DelayedMessage dm && id.equals(dm.id);
-        }
-
-        @Override
-        public int hashCode() {
-            return id.hashCode();
-        }
+        // Deliberately no equals/hashCode: entries are identified by their token, and equality by
+        // message id would make a stale entry indistinguishable from the live one for that id.
     }
 }

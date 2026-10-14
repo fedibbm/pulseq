@@ -3,6 +3,13 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-10-14]
+
+### Fixed
+- **A stale timer could act on a replayed message.** Timers are now tracked by
+  token, so a timer left pending on an earlier delivery cannot fire against the
+  current one. `TimerCancellationTest` covers it.
+
 ## [2026-10-10]
 
 ### Added
