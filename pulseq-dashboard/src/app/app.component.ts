@@ -18,6 +18,7 @@ export class AppComponent implements OnInit, OnDestroy {
   metrics: Metrics = emptyMetrics();
   health: Health = { status: 'DOWN', topics: [], queueDepths: {} };
   rows: TopicRow[] = [];
+  readonly brokerHost = window.location.host;
 
   autoRefresh = true;
   refreshMs = 2000;
@@ -117,6 +118,8 @@ export class AppComponent implements OnInit, OnDestroy {
       ...Object.keys(this.metrics.retried),
       ...Object.keys(this.metrics.expired),
       ...Object.keys(this.metrics.rejected),
+      ...Object.keys(this.metrics.duplicate ?? {}),
+      ...Object.keys(this.metrics.backpressure ?? {}),
       ...this.health.topics,
     ]);
 
@@ -132,6 +135,8 @@ export class AppComponent implements OnInit, OnDestroy {
           retried: num(this.metrics.retried[topic]),
           expired: num(this.metrics.expired[topic]),
           rejected: num(this.metrics.rejected[topic]),
+          duplicate: num(this.metrics.duplicate?.[topic]),
+          backpressure: num(this.metrics.backpressure?.[topic]),
         };
 
         const depthHistory = this.depthHistory.get(topic) ?? [];
@@ -146,7 +151,10 @@ export class AppComponent implements OnInit, OnDestroy {
       });
   }
 
-  totals(): { published: number; acked: number; inQueue: number; deadLettered: number; retried: number; expired: number } {
+  totals(): {
+    published: number; acked: number; inQueue: number; deadLettered: number;
+    retried: number; expired: number; rejected: number; duplicate: number; backpressure: number;
+  } {
     return {
       published: this.rows.reduce((s, r) => s + r.published, 0),
       acked: this.rows.reduce((s, r) => s + r.acknowledged, 0),
@@ -154,6 +162,9 @@ export class AppComponent implements OnInit, OnDestroy {
       deadLettered: this.rows.reduce((s, r) => s + r.deadLettered, 0),
       retried: this.rows.reduce((s, r) => s + r.retried, 0),
       expired: this.rows.reduce((s, r) => s + r.expired, 0),
+      rejected: this.rows.reduce((s, r) => s + r.rejected, 0),
+      duplicate: this.rows.reduce((s, r) => s + r.duplicate, 0),
+      backpressure: this.rows.reduce((s, r) => s + r.backpressure, 0),
     };
   }
 
@@ -242,5 +253,7 @@ function emptyMetrics(): Metrics {
     retried: {},
     expired: {},
     rejected: {},
+    duplicate: {},
+    backpressure: {},
   };
 }

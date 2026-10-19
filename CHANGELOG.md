@@ -3,6 +3,12 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-10-19]
+
+### Changed
+- Dashboard: the `duplicate` and `backpressure` counters are shown, and the
+  layout was flattened into plainer panels.
+
 ## [2026-10-14]
 
 ### Fixed
