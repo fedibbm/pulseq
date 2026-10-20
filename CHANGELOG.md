@@ -3,6 +3,11 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-10-20]
+
+### Added
+- `Makefile` wrapping the build, demo and Docker workflows.
+
 ## [2026-10-19]
 
 ### Changed
