@@ -45,16 +45,21 @@ class QueueManagerTest extends BrokerTestSupport {
     }
 
     @Test
-    void recoverRefusesToBlockWhenUnfinishedMessagesExceedCapacity() {
+    void recoverRestoresEveryUnfinishedMessageEvenAboveCapacity() throws InterruptedException {
+        // A broker killed while a topic is full also has messages in flight, so it can hold more
+        // unfinished messages than its capacity. Recovery must restore all of them without
+        // blocking, then apply backpressure until the topic drains.
         InMemoryMessageStore store = new InMemoryMessageStore();
         for (int i = 0; i < 3; i++) {
             store.save(message(String.valueOf(i), "t"));
         }
         QueueManager qm = new QueueManager(store, new BrokerConfig(1, 100, 50, 5_000, 3, 8, 1_000));
 
-        IllegalStateException thrown = assertThrows(IllegalStateException.class, qm::recover,
-                "recovery must fail fast instead of blocking forever on a full queue");
-        assertTrue(thrown.getMessage().contains("capacity"), thrown.getMessage());
+        qm.recover();
+
+        assertEquals(3, qm.getQueue("t").size(), "every unfinished message must be restored");
+        assertFalse(qm.offer("t", message("new", "t"), 50, java.util.concurrent.TimeUnit.MILLISECONDS),
+                "a topic restored above capacity must refuse publishes until it drains");
     }
 
     @Test

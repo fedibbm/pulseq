@@ -3,6 +3,13 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-10-25]
+
+### Fixed
+- **A broker that crashed under load could not restart.** `MessageQueue` and
+  `QueueManager` now recover cleanly from a crash under load, and
+  `tools/crash_test.py` reproduces the crash and checks the restart.
+
 ## [2026-10-20]
 
 ### Added

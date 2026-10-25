@@ -136,12 +136,17 @@ public class QueueManager {
         for (Message message : survivors) {
             perTopic.merge(message.getTopic(), 1, Integer::sum);
         }
+        // A topic can legitimately hold more unfinished messages than its capacity: the
+        // capacity bounds the messages waiting in the queue, not those in flight. Refusing to
+        // start in that case would make a broker that crashed under load unable to restart.
+        // Every unfinished message is therefore restored; the topic starts above capacity and
+        // publishes are refused with backpressure until consumers drain it.
         for (Map.Entry<String, Integer> entry : perTopic.entrySet()) {
             int capacity = config.getCapacity();
             if (entry.getValue() > capacity) {
-                throw new IllegalStateException("topic '" + entry.getKey() + "' has "
-                        + entry.getValue() + " unfinished messages but its capacity is " + capacity
-                        + "; raise the capacity or drain the topic before restarting");
+                System.err.println("PulseQ: topic '" + entry.getKey() + "' recovered "
+                        + entry.getValue() + " unfinished messages, above its capacity of "
+                        + capacity + "; publishes are refused until it drains");
             }
         }
         for (Message message : survivors) {

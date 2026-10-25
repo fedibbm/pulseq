@@ -124,13 +124,11 @@ public class MessageQueue {
      * @throws IllegalStateException if more messages would be restored than the capacity allows
      */
     void restore(Message message) {
+        // Never waits for capacity and never refuses: recovery runs before any consumer exists,
+        // so waiting would deadlock, and refusing would lose the ability to restart. A topic
+        // restored above capacity applies backpressure to publishers until it drains.
         lock.lock();
         try {
-            if (messages.size() >= capacity) {
-                throw new IllegalStateException("topic '" + topic + "' has more unfinished messages ("
-                        + (messages.size() + 1) + ") than its capacity (" + capacity
-                        + "); raise the capacity before starting the broker");
-            }
             store.save(message);
             messages.addLast(message);
             notEmpty.signal();
