@@ -3,6 +3,11 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-10-28]
+
+### Build
+- Measure test coverage with JaCoCo.
+
 ## [2026-10-25]
 
 ### Fixed
