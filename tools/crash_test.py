@@ -20,10 +20,13 @@ Usage (from the repository root, with `docker compose up -d` running):
 """
 
 import argparse
+import base64
 import collections
 import json
 import os
+import select
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -32,7 +35,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from bench import ws_connect, ws_read_frame, ws_send  # noqa: E402
+from bench import ws_send  # noqa: E402
 
 BASE = "http://localhost:8080"
 CONTAINER = "message-broker-server-1"
@@ -61,21 +64,85 @@ def healthy():
         return False
 
 
+def ws_connect_raw(path):
+    """WebSocket handshake on a raw socket; returns the socket and any bytes read past it."""
+    key = base64.b64encode(os.urandom(16)).decode()
+    sock = socket.create_connection(("localhost", 8080), timeout=10)
+    sock.sendall(("GET %s HTTP/1.1\r\nHost: localhost:8080\r\nUpgrade: websocket\r\n"
+                  "Connection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
+                  "Sec-WebSocket-Version: 13\r\n\r\n" % (path, key)).encode())
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("handshake failed")
+        data += chunk
+    head, _, rest = data.partition(b"\r\n\r\n")
+    if b" 101 " not in head.split(b"\r\n", 1)[0]:
+        raise ConnectionError("handshake refused")
+    sock.settimeout(None)
+    return sock, rest
+
+
+class FrameReader:
+    """Parse WebSocket frames from a raw socket without losing bytes.
+
+    Reading through a buffered file object with a socket timeout can drop data when
+    the timeout fires mid-read, so the socket is polled with select and frames are
+    parsed from an explicit buffer instead.
+    """
+
+    def __init__(self, sock):
+        self.sock = sock
+        self.buf = b""
+
+    def _need(self, n, stop):
+        while len(self.buf) < n:
+            if stop.is_set():
+                return False
+            ready, _, _ = select.select([self.sock], [], [], 0.5)
+            if not ready:
+                continue
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("closed")
+            self.buf += chunk
+        return True
+
+    def next_frame(self, stop):
+        if not self._need(2, stop):
+            return None
+        b0, b1 = self.buf[0], self.buf[1]
+        length, offset = b1 & 0x7F, 2
+        if length == 126:
+            if not self._need(4, stop):
+                return None
+            length, offset = struct.unpack(">H", self.buf[2:4])[0], 4
+        elif length == 127:
+            if not self._need(10, stop):
+                return None
+            length, offset = struct.unpack(">Q", self.buf[2:10])[0], 10
+        if not self._need(offset + length, stop):
+            return None
+        payload = self.buf[offset:offset + length]
+        self.buf = self.buf[offset + length:]
+        return b0 & 0x0F, payload
+
+
 def consumer(topic, received, lock, stop):
     """Acknowledge every delivery, reconnecting whenever the connection drops."""
     while not stop.is_set():
         try:
-            sock, stream = ws_connect("/subscribe/%s" % topic)
+            sock, leftover = ws_connect_raw("/subscribe/%s" % topic)
         except OSError:
             time.sleep(0.5)
             continue
-        sock.settimeout(1.0)
+        reader = FrameReader(sock)
+        reader.buf = leftover  # bytes after the handshake belong to the first frames
         while not stop.is_set():
             try:
-                frame = ws_read_frame(stream)
-            except socket.timeout:
-                continue
-            except OSError:
+                frame = reader.next_frame(stop)
+            except (OSError, ConnectionError):
                 break
             if frame is None or frame[0] == 0x8:
                 break

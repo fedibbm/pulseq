@@ -3,6 +3,15 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-10-29]
+
+### Added
+- `tools/soak_test.py`: a soak test that keeps the broker under load for a
+  sustained period.
+
+### Changed
+- `tools/crash_test.py`: a lossless WebSocket reader.
+
 ## [2026-10-28]
 
 ### Build
