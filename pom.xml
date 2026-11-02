@@ -13,6 +13,7 @@
 
     <modules>
         <module>pulseq-core</module>
+        <module>pulseq-raft</module>
         <module>pulseq-sdk</module>
         <module>pulseq-server</module>
     </modules>

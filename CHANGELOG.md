@@ -3,6 +3,19 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-11-02]
+
+### Added
+- **`pulseq-raft`**: Raft consensus written from scratch — leader election, log
+  replication and commit. `RaftNode` holds no threads, clock or network; its
+  owner drives `tick()`, `step()` and `drainOutbox()`.
+- `SimCluster`: a deterministic simulated network that delays, drops, duplicates
+  and reorders messages, splits the cluster into partitions, and crashes and
+  restarts nodes.
+- `RaftSimulationTest` and `RaftFuzzTest`: one named scenario per test,
+  including the Figure 8 case from the paper, plus random fault schedules that
+  must leave every node in the same state.
+
 ## [2026-10-29]
 
 ### Added
