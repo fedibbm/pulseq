@@ -16,6 +16,9 @@ simulated network, and any failure can be replayed from its seed.
 | `RaftStorage` / `MemoryRaftStorage` | What must survive a crash: term, vote, log |
 | `StateMachine` | Receives committed commands in log order |
 | `RaftMessage`, `Envelope`, `LogEntry`, `RaftConfig` | Messages, log entries, timing |
+| `RaftRuntime` | Runs one node on its own thread; `propose()` returns a future that completes on commit |
+| `LeadershipListener` | Told when the node leads *and* has applied everything earlier leaders committed |
+| `Transport` / `LocalNetwork` | How messages travel; `LocalNetwork` links nodes inside one JVM |
 
 ## Tests
 
@@ -32,8 +35,11 @@ checks the safety properties from the Raft paper:
 the paper. `RaftFuzzTest` runs 600 random fault schedules (300 on 3 nodes, 300 on 5), then
 stops the faults and requires every node to reach the same state.
 
+`RaftRuntimeTest` runs three nodes on real threads and timers: commit, rejection on a
+follower, takeover when the leader stops, and a command stranded on a cut-off leader.
+
 ```
-mvn -pl pulseq-raft test                          # about 5 seconds
+mvn -pl pulseq-raft test                          # about 10 seconds
 mvn -pl pulseq-raft test -Draft.fuzz.seeds=5000   # longer fuzz run
 ```
 
@@ -47,4 +53,4 @@ and committing an earlier-term entry by counting replicas.
 - Membership changes (the cluster's members are fixed at start)
 - Log compaction and snapshots (the log grows without bound)
 - Linearizable reads, pre-vote, leadership transfer
-- A real network transport and disk storage (stage 2)
+- A network transport between processes and disk storage (stage 2)

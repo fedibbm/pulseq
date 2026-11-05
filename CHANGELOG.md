@@ -3,6 +3,14 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-11-05]
+
+### Added
+- `RaftRuntime`: runs a node on its own thread; `propose()` returns a future
+  that completes once the entry is committed.
+- `LeadershipListener`, `LocalNetwork` and `NotLeaderException`, with
+  `RaftRuntimeTest` covering commit, rejection on a follower and takeover.
+
 ## [2026-11-02]
 
 ### Added
