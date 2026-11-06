@@ -42,7 +42,14 @@ public class QueueManager {
             metrics.recordDuplicate(topic);
             return false;
         }
-        createQueue(topic).enqueue(message);
+        try {
+            createQueue(topic).enqueue(message);
+        } catch (RuntimeException storeFailure) {
+            // The message was not stored, so its id must not count as seen: the producer's
+            // retry would otherwise be dropped as a duplicate.
+            seenMessageIds.remove(message.getId());
+            throw storeFailure;
+        }
         return true;
     }
 
@@ -72,7 +79,14 @@ public class QueueManager {
             return PublishResult.DUPLICATE;
         }
         MessageQueue queue = createQueue(topic);
-        if (queue.offer(message, timeout, unit)) {
+        boolean accepted;
+        try {
+            accepted = queue.offer(message, timeout, unit);
+        } catch (RuntimeException storeFailure) {
+            seenMessageIds.remove(message.getId());
+            throw storeFailure;
+        }
+        if (accepted) {
             return PublishResult.ACCEPTED;
         }
         seenMessageIds.remove(message.getId());

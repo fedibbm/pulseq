@@ -171,10 +171,13 @@ public class MessageQueue {
     public boolean ack(String messageId) {
         lock.lock();
         try {
-            Message message = inFlight.remove(messageId);
+            Message message = inFlight.get(messageId);
             if (message != null) {
-                removeFromDelays(messageId);
+                // Store first: if the store refuses, the message stays in flight and its
+                // visibility timeout redelivers it, instead of vanishing from memory.
                 store.markAcknowledged(messageId);
+                inFlight.remove(messageId);
+                removeFromDelays(messageId);
                 message.setStatus(MessageStatus.ACKNOWLEDGED);
                 metrics.recordAck(topic);
                 notFull.signal();

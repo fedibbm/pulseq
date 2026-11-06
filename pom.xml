@@ -12,8 +12,8 @@
     <description>Lightweight message broker for Java/Spring Boot teams</description>
 
     <modules>
-        <module>pulseq-core</module>
         <module>pulseq-raft</module>
+        <module>pulseq-core</module>
         <module>pulseq-sdk</module>
         <module>pulseq-server</module>
     </modules>

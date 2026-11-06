@@ -3,6 +3,12 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-11-06]
+
+### Added
+- `ReplicatedMessageStore`: the message store is replicated through Raft, with
+  `ReplicationException` for a write that cannot be committed.
+
 ## [2026-11-05]
 
 ### Added
