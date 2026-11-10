@@ -3,6 +3,12 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-11-10]
+
+### Added
+- `ClusteredBroker` and `ClusterConfig`: a broker that takes over when the
+  leader is lost, delivering again whatever was not yet acknowledged.
+
 ## [2026-11-06]
 
 ### Added

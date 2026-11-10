@@ -35,6 +35,9 @@ public class MessageQueue {
     private final long maxRetryDelayMillis;
     private final int defaultMaxRetries;
 
+    /** Delay before retrying a timer-driven change that the store refused. */
+    private static final long STORE_RETRY_MILLIS = 500;
+
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition notEmpty = lock.newCondition();
     private final Condition notFull = lock.newCondition();
@@ -124,12 +127,22 @@ public class MessageQueue {
      * @throws IllegalStateException if more messages would be restored than the capacity allows
      */
     void restore(Message message) {
+        restore(message, true);
+    }
+
+    /**
+     * @param rewriteStore false when the store already holds the message exactly as it should be
+     *                     restored, so writing it again would only cost time
+     */
+    void restore(Message message, boolean rewriteStore) {
         // Never waits for capacity and never refuses: recovery runs before any consumer exists,
         // so waiting would deadlock, and refusing would lose the ability to restart. A topic
         // restored above capacity applies backpressure to publishers until it drains.
         lock.lock();
         try {
-            store.save(message);
+            if (rewriteStore) {
+                store.save(message);
+            }
             messages.addLast(message);
             notEmpty.signal();
             metrics.recordPublish(topic);
@@ -243,20 +256,29 @@ public class MessageQueue {
                 }
                 liveTimers.remove(id);
                 Message message = delayed.message();
-                if (message.getRetryAt() > 0) {
-                    requeueAvailable(message);
-                    requeued = true;
-                } else if (inFlight.containsKey(message.getId())) {
-                    if (message.isExpired()) {
-                        expire(message);
-                    } else {
-                        message.incrementDeliveryAttempts();
-                        if (message.getDeliveryAttempts() >= effectiveMaxRetries(message)) {
-                            deadLetter(message);
+                try {
+                    if (message.getRetryAt() > 0) {
+                        requeueAvailable(message);
+                        requeued = true;
+                    } else if (inFlight.containsKey(message.getId())) {
+                        if (message.isExpired()) {
+                            expire(message);
                         } else {
-                            scheduleRetry(message);
+                            message.incrementDeliveryAttempts();
+                            if (message.getDeliveryAttempts() >= effectiveMaxRetries(message)) {
+                                deadLetter(message);
+                            } else {
+                                scheduleRetry(message);
+                            }
                         }
                     }
+                } catch (RuntimeException storeFailure) {
+                    // The store refused the change, so the message is still where it was. Its
+                    // timer is spent, so give it a new one: without it the message would wait
+                    // forever.
+                    scheduleTimer(message, System.currentTimeMillis() + STORE_RETRY_MILLIS);
+                    System.err.println("PulseQ: could not move message '" + id + "' on topic '"
+                            + topic + "', will retry: " + storeFailure);
                 }
             }
             if (requeued) notEmpty.signalAll();
@@ -278,8 +300,8 @@ public class MessageQueue {
             while (it.hasNext()) {
                 Message message = it.next();
                 if (message.isExpired()) {
-                    it.remove();
                     expire(message);
+                    it.remove();
                     dropped++;
                 }
             }
@@ -300,10 +322,19 @@ public class MessageQueue {
             int replayed = 0;
             Message message;
             while ((message = deadLetterQueue.remove()) != null) {
+                int attempts = message.getDeliveryAttempts();
                 message.resetDeliveryAttempts();
-                message.setStatus(MessageStatus.AVAILABLE);
                 message.setRetryAt(0);
-                store.save(message);
+                try {
+                    saveWithStatus(message, MessageStatus.AVAILABLE);
+                } catch (RuntimeException storeFailure) {
+                    for (int i = 0; i < attempts; i++) {
+                        message.incrementDeliveryAttempts();
+                    }
+                    deadLetterQueue.add(message);
+                    if (replayed > 0) notEmpty.signalAll();
+                    throw storeFailure;
+                }
                 messages.addLast(message);
                 replayed++;
             }
@@ -315,12 +346,33 @@ public class MessageQueue {
     }
 
     private void requeueAvailable(Message message) {
+        long retryAt = message.getRetryAt();
+        message.setRetryAt(0);
+        try {
+            saveWithStatus(message, MessageStatus.AVAILABLE);
+        } catch (RuntimeException storeFailure) {
+            message.setRetryAt(retryAt);
+            throw storeFailure;
+        }
         inFlight.remove(message.getId());
         removeFromDelays(message.getId());
-        message.setRetryAt(0);
-        message.setStatus(MessageStatus.AVAILABLE);
-        store.save(message);
         messages.addLast(message);
+    }
+
+    /**
+     * Writes the message to the store with a new status. The store is updated before anything
+     * in memory changes: if it refuses, the status is put back and the message stays where it
+     * was, so memory never runs ahead of the store.
+     */
+    private void saveWithStatus(Message message, MessageStatus status) {
+        MessageStatus previous = message.getStatus();
+        message.setStatus(status);
+        try {
+            store.save(message);
+        } catch (RuntimeException storeFailure) {
+            message.setStatus(previous);
+            throw storeFailure;
+        }
     }
 
     private void scheduleRetry(Message message) {
@@ -332,19 +384,17 @@ public class MessageQueue {
     }
 
     private void deadLetter(Message message) {
+        saveWithStatus(message, MessageStatus.DEAD_LETTERED);
         inFlight.remove(message.getId());
         removeFromDelays(message.getId());
-        message.setStatus(MessageStatus.DEAD_LETTERED);
-        store.save(message);
         deadLetterQueue.add(message);
         metrics.recordDeadLetter(topic);
     }
 
     private void expire(Message message) {
+        saveWithStatus(message, MessageStatus.EXPIRED);
         inFlight.remove(message.getId());
         removeFromDelays(message.getId());
-        message.setStatus(MessageStatus.EXPIRED);
-        store.save(message);
         metrics.recordExpired(topic);
     }
 

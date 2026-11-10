@@ -145,6 +145,16 @@ public class QueueManager {
      * @throws IllegalStateException when a topic holds more unfinished messages than its capacity
      */
     public void recover() {
+        recover(true);
+    }
+
+    /**
+     * @param rewriteStore false to rebuild the queues from the store without writing the
+     *                     messages back to it. A broker taking over a replicated store uses
+     *                     this: the store is already correct, and rewriting every unfinished
+     *                     message would delay the takeover by one replication round each.
+     */
+    public void recover(boolean rewriteStore) {
         Map<String, Integer> perTopic = new LinkedHashMap<>();
         List<Message> survivors = store.loadAllAvailable();
         for (Message message : survivors) {
@@ -166,7 +176,7 @@ public class QueueManager {
         for (Message message : survivors) {
             message.setStatus(MessageStatus.AVAILABLE);
             seenMessageIds.putIfAbsent(message.getId(), System.currentTimeMillis());
-            createQueue(message.getTopic()).restore(message);
+            createQueue(message.getTopic()).restore(message, rewriteStore);
         }
         for (Message message : store.loadDeadLettered()) {
             createQueue(message.getTopic()).getDeadLetterQueue().add(message);
