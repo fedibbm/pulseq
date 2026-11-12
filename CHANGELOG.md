@@ -3,6 +3,18 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-11-12]
+
+### Added
+- `FileRaftStorage`: an append-only log on disk with a checksum per record, cut
+  at the first damaged record on open.
+- `RaftCodec`: the binary format of entries and messages, on disk and on the
+  wire.
+- `TcpTransport`: Raft messages between brokers over TCP, one connection per
+  peer, reopened after a failure.
+- `ClusteredBrokerTcpTest`, and the simulation now also runs with the log on
+  disk.
+
 ## [2026-11-10]
 
 ### Added

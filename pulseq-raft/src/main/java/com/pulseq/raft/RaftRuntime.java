@@ -61,7 +61,10 @@ public final class RaftRuntime implements AutoCloseable {
     }
 
     public void start() {
-        loop.scheduleAtFixedRate(() -> run(node::tick), tickMillis, tickMillis, TimeUnit.MILLISECONDS);
+        // Fixed delay, not fixed rate: after a stall (a slow disk sync, a long pause) a fixed
+        // rate would fire every missed tick at once, ahead of the messages that queued up
+        // meanwhile, and the node would call an election it has no reason to call.
+        loop.scheduleWithFixedDelay(() -> run(node::tick), tickMillis, tickMillis, TimeUnit.MILLISECONDS);
     }
 
     /** Hands a message from another node to this one. Safe to call from any thread. */
@@ -104,6 +107,9 @@ public final class RaftRuntime implements AutoCloseable {
         }
         try {
             work.run();
+            // Replies and commit notices promise that appended entries exist, so the entries
+            // must be on disk before any of them leaves this node.
+            storage.flush();
             for (Envelope envelope : node.drainOutbox()) {
                 transport.send(envelope);
             }

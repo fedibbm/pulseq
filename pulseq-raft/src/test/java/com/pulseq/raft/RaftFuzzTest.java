@@ -1,6 +1,9 @@
 package com.pulseq.raft;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -36,8 +39,22 @@ class RaftFuzzTest {
         }
     }
 
+    /** The same schedules with the log on disk: every crash closes the files, every restart reopens them. */
+    @Test
+    void threeNodesWithLogsOnDiskSurviveRandomFaults(@TempDir Path directory) {
+        for (long seed = 0; seed < Math.max(1, SEEDS / 15); seed++) {
+            Path run = directory.resolve("seed-" + seed);
+            runSchedule(new SimCluster(3, 2_000_000 + seed, RaftConfig.defaults(),
+                    id -> new FileRaftStorage(run.resolve("node-" + id))), 2_000_000 + seed);
+        }
+    }
+
     static void runSchedule(int size, long seed) {
-        SimCluster cluster = new SimCluster(size, seed);
+        runSchedule(new SimCluster(size, seed), seed);
+    }
+
+    static void runSchedule(SimCluster cluster, long seed) {
+        int size = cluster.ids().size();
         Random chaos = new Random(seed ^ 0x5DEECE66DL);
         cluster.dropRate = chaos.nextDouble() * 0.3;
         cluster.duplicateRate = chaos.nextDouble() * 0.2;

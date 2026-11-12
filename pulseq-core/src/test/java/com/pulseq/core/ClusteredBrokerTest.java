@@ -127,6 +127,39 @@ class ClusteredBrokerTest {
         }
     }
 
+    @Test
+    void repeatedLeaderChangesLoseNothing() throws Exception {
+        int total = 200;
+        Set<String> accepted = new ConcurrentSkipListSet<>();
+        Thread producer = new Thread(() -> {
+            for (int i = 0; i < total; i++) {
+                String id = String.format("m%03d", i);
+                publishUntilAccepted(id);
+                accepted.add(id);
+            }
+        }, "producer");
+        producer.start();
+
+        // Cut the current leader off six times while messages flow, so leadership moves around
+        // and brokers that led before lead again.
+        for (int round = 0; round < 6; round++) {
+            int leader = servingBroker().id();
+            network.disconnect(leader);
+            await("another broker to take over",
+                    () -> brokers.values().stream().anyMatch(b -> b.id() != leader && b.isServing()));
+            network.reconnect(leader);
+            await("the cut-off broker to step aside", () -> !brokers.get(leader).isServing());
+        }
+
+        producer.join(TimeUnit.SECONDS.toMillis(60));
+        assertFalse(producer.isAlive(), "producer finished");
+        await("every accepted message to reach a consumer", () -> received.containsAll(accepted));
+        for (int id : MEMBERS) {
+            await("broker " + id + " to have nothing unfinished",
+                    () -> stores.get(id).loadAllAvailable().isEmpty());
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private void start(int id) {

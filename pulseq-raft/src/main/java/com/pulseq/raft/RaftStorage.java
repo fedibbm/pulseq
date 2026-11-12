@@ -33,4 +33,11 @@ public interface RaftStorage {
 
     /** Removes the entry at {@code fromIndex} and everything after it. */
     void truncateFrom(long fromIndex);
+
+    /**
+     * Makes every entry appended so far durable. Appends may be buffered until this is called;
+     * the node's owner calls it before sending any message that promises the entries exist.
+     */
+    default void flush() {
+    }
 }

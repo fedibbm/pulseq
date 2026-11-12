@@ -11,8 +11,12 @@ import com.pulseq.raft.RaftConfig;
  */
 public record ClusterConfig(RaftConfig raft, long tickMillis, long commitTimeoutMillis) {
 
-    /** Elections after 100 to 200 ms without a leader, heartbeats every 20 ms. */
+    /**
+     * Elections after 0.5 to 1 s without a leader, heartbeats every 100 ms. The election
+     * timeout must stay well above the longest pause a healthy broker can have (a disk sync,
+     * a garbage collection), or brokers depose a leader that is merely slow.
+     */
     public static ClusterConfig defaults() {
-        return new ClusterConfig(RaftConfig.defaults(), 10, 2_000);
+        return new ClusterConfig(new RaftConfig(50, 100, 10, 64), 10, 5_000);
     }
 }

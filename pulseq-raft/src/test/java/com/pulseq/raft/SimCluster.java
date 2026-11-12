@@ -11,6 +11,7 @@ import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.TreeMap;
 import java.util.function.BooleanSupplier;
+import java.util.function.IntFunction;
 
 /**
  * A Raft cluster running in one thread over a simulated network. Time advances one tick per
@@ -33,7 +34,9 @@ final class SimCluster {
     private final Random random;
     private final RaftConfig config;
     private final List<Integer> ids = new ArrayList<>();
-    private final Map<Integer, MemoryRaftStorage> storages = new HashMap<>();
+    private final Map<Integer, RaftStorage> storages = new HashMap<>();
+    /** Opens a node's storage; called again on restart, like a process reopening its files. */
+    private final IntFunction<RaftStorage> opener;
     private final Map<Integer, RaftNode> nodes = new HashMap<>();
     private final Map<Integer, List<String>> applied = new HashMap<>();
     private final Map<Integer, Integer> group = new HashMap<>();
@@ -58,12 +61,16 @@ final class SimCluster {
     }
 
     SimCluster(int size, long seed, RaftConfig config) {
+        this(size, seed, config, memoryStorage());
+    }
+
+    SimCluster(int size, long seed, RaftConfig config, IntFunction<RaftStorage> opener) {
         this.seed = seed;
         this.random = new Random(seed);
         this.config = config;
+        this.opener = opener;
         for (int id = 0; id < size; id++) {
             ids.add(id);
-            storages.put(id, new MemoryRaftStorage());
             group.put(id, 0);
         }
         ids.forEach(this::start);
@@ -72,7 +79,18 @@ final class SimCluster {
     // ------------------------------------------------------------------ faults
 
     void crash(int id) {
-        nodes.remove(id);
+        if (nodes.remove(id) != null && storages.get(id) instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        }
+    }
+
+    private static IntFunction<RaftStorage> memoryStorage() {
+        Map<Integer, RaftStorage> kept = new HashMap<>();
+        return id -> kept.computeIfAbsent(id, i -> new MemoryRaftStorage());
     }
 
     /** Starts a crashed node again over its surviving storage; its state machine starts empty. */
@@ -83,6 +101,7 @@ final class SimCluster {
     }
 
     private void start(int id) {
+        storages.put(id, opener.apply(id));
         List<String> log = new ArrayList<>();
         applied.put(id, log);
         long[] lastIndex = {0};
@@ -280,7 +299,7 @@ final class SimCluster {
 
     /** A new leader must already hold every entry committed in an earlier term. */
     private void checkLeaderCompleteness(RaftNode leader) {
-        MemoryRaftStorage log = storages.get(leader.id());
+        RaftStorage log = storages.get(leader.id());
         committed.forEach((index, entry) -> {
             if (entry.termWhenFirstApplied() >= leader.currentTerm()) {
                 return;
@@ -300,8 +319,8 @@ final class SimCluster {
                 if (a >= b) {
                     continue;
                 }
-                MemoryRaftStorage logA = storages.get(a);
-                MemoryRaftStorage logB = storages.get(b);
+                RaftStorage logA = storages.get(a);
+                RaftStorage logB = storages.get(b);
                 long index = Math.min(logA.lastIndex(), logB.lastIndex());
                 while (index > 0 && logA.termAt(index) != logB.termAt(index)) {
                     index--;
@@ -324,7 +343,7 @@ final class SimCluster {
         StringBuilder out = new StringBuilder();
         for (int id : ids) {
             RaftNode node = nodes.get(id);
-            MemoryRaftStorage log = storages.get(id);
+            RaftStorage log = storages.get(id);
             out.append("  node ").append(id).append(": ");
             if (node == null) {
                 out.append("crashed");
