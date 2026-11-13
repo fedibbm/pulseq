@@ -1,7 +1,7 @@
 # pulseq-raft
 
 Raft consensus for PulseQ: leader election and log replication, written from scratch.
-This is stage 1 of making PulseQ run as a cluster of brokers that survives losing one.
+PulseQ's cluster mode is built on it (see "Cluster mode" in the main README).
 
 ## Design
 
@@ -19,6 +19,9 @@ simulated network, and any failure can be replayed from its seed.
 | `RaftRuntime` | Runs one node on its own thread; `propose()` returns a future that completes on commit |
 | `LeadershipListener` | Told when the node leads *and* has applied everything earlier leaders committed |
 | `Transport` / `LocalNetwork` | How messages travel; `LocalNetwork` links nodes inside one JVM |
+| `TcpTransport` | Messages between processes over TCP, one connection per peer, reopened after a failure |
+| `FileRaftStorage` | Log on disk: append-only with a checksum per record, cut at the first damaged record on opening |
+| `RaftCodec` | Binary format of entries and messages, on disk and on the wire |
 
 ## Tests
 
@@ -33,7 +36,8 @@ checks the safety properties from the Raft paper:
 
 `RaftSimulationTest` has one named scenario per test, including the Figure 8 scenario from
 the paper. `RaftFuzzTest` runs 600 random fault schedules (300 on 3 nodes, 300 on 5), then
-stops the faults and requires every node to reach the same state.
+stops the faults and requires every node to reach the same state. A further 20 schedules run
+with the log on disk, closing the files on every crash and reopening them on restart.
 
 `RaftRuntimeTest` runs three nodes on real threads and timers: commit, rejection on a
 follower, takeover when the leader stops, and a command stranded on a cut-off leader.
@@ -53,4 +57,4 @@ and committing an earlier-term entry by counting replicas.
 - Membership changes (the cluster's members are fixed at start)
 - Log compaction and snapshots (the log grows without bound)
 - Linearizable reads, pre-vote, leadership transfer
-- A network transport between processes and disk storage (stage 2)
+- Authentication and encryption between nodes

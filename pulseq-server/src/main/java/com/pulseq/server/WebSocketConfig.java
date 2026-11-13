@@ -1,9 +1,9 @@
 package com.pulseq.server;
 
-import com.pulseq.core.Dispatcher;
+import com.pulseq.core.Broker;
 import com.pulseq.core.Message;
 import com.pulseq.core.MessageListener;
-import com.pulseq.core.QueueManager;
+import com.pulseq.core.MessageQueue;
 import com.pulseq.core.Reason;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.CloseStatus;
@@ -26,34 +26,33 @@ import java.util.concurrent.ConcurrentMap;
  * <p>Connect to {@code /subscribe/{topic}[?group=myGroup]}. The server pushes each delivery
  * as JSON: {@code {"id":..., "topic":..., "deliveryAttempts":..., "payload":"<base64>"}}.
  * Consumers reply with {@code ACK <messageId>} or {@code NACK <messageId> <REASON>}.</p>
+ *
+ * <p>In a cluster a consumer may connect to any broker, but only the leader delivers. A
+ * consumer that wants every message without interruption connects to all of them.</p>
  */
 @Configuration
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
 
-    private final QueueManager queueManager;
-    private final Dispatcher dispatcher;
+    private final Broker broker;
 
-    public WebSocketConfig(QueueManager queueManager, Dispatcher dispatcher) {
-        this.queueManager = queueManager;
-        this.dispatcher = dispatcher;
+    public WebSocketConfig(Broker broker) {
+        this.broker = broker;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(new PulseQWebSocketHandler(queueManager, dispatcher), "/subscribe/{topic}")
+        registry.addHandler(new PulseQWebSocketHandler(broker), "/subscribe/{topic}")
                 .setAllowedOrigins("*");
     }
 
     private static class PulseQWebSocketHandler extends TextWebSocketHandler {
 
-        private final QueueManager queueManager;
-        private final Dispatcher dispatcher;
+        private final Broker broker;
         private final ConcurrentMap<String, Subscription> subscriptions = new ConcurrentHashMap<>();
 
-        PulseQWebSocketHandler(QueueManager queueManager, Dispatcher dispatcher) {
-            this.queueManager = queueManager;
-            this.dispatcher = dispatcher;
+        PulseQWebSocketHandler(Broker broker) {
+            this.broker = broker;
         }
 
         @Override
@@ -65,7 +64,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
             MessageListener listener = message -> sendDelivery(session, message);
             subscriptions.put(session.getId(), new Subscription(topic, listener));
-            dispatcher.subscribe(topic, group, listener);
+            broker.subscribe(topic, group, listener);
         }
 
         @Override
@@ -74,15 +73,26 @@ public class WebSocketConfig implements WebSocketConfigurer {
             if (sub == null) return;
 
             String payload = message.getPayload().trim();
-            if (payload.startsWith("ACK")) {
-                queueManager.getQueue(sub.topic).ack(payload.substring(3).trim());
-            } else if (payload.startsWith("NACK")) {
-                String[] parts = payload.substring(4).trim().split("\\s+");
-                if (parts.length >= 1 && !parts[0].isEmpty()) {
-                    String messageId = parts[0];
-                    Reason reason = parts.length >= 2 ? Reason.valueOf(parts[1].toUpperCase()) : Reason.FAILED;
-                    queueManager.getQueue(sub.topic).nack(messageId, reason);
+            MessageQueue queue;
+            try {
+                queue = broker.queues().getQueue(sub.topic);
+            } catch (RuntimeException notLeader) {
+                return; // this broker no longer leads: the message is redelivered by the leader
+            }
+            if (queue == null) return;
+            try {
+                if (payload.startsWith("ACK")) {
+                    queue.ack(payload.substring(3).trim());
+                } else if (payload.startsWith("NACK")) {
+                    String[] parts = payload.substring(4).trim().split("\\s+");
+                    if (parts.length >= 1 && !parts[0].isEmpty()) {
+                        String messageId = parts[0];
+                        Reason reason = parts.length >= 2 ? Reason.valueOf(parts[1].toUpperCase()) : Reason.FAILED;
+                        queue.nack(messageId, reason);
+                    }
                 }
+            } catch (com.pulseq.raft.NotLeaderException | com.pulseq.core.ReplicationException unconfirmed) {
+                // Not recorded by a majority: the message stays in flight and is delivered again.
             }
         }
 
@@ -90,7 +100,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
         public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
             Subscription sub = subscriptions.remove(session.getId());
             if (sub != null) {
-                dispatcher.onSessionClosed(sub.listener);
+                broker.unsubscribe(sub.listener);
             }
         }
 

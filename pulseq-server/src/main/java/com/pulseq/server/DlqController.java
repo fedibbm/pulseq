@@ -1,9 +1,9 @@
 package com.pulseq.server;
 
 import com.pulseq.core.DeadLetterQueue;
+import com.pulseq.core.Broker;
 import com.pulseq.core.Message;
 import com.pulseq.core.MessageQueue;
-import com.pulseq.core.QueueManager;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,10 +18,10 @@ import java.util.Map;
 @RequestMapping("/dlq")
 public class DlqController {
 
-    private final QueueManager queueManager;
+    private final Broker broker;
 
-    public DlqController(QueueManager queueManager) {
-        this.queueManager = queueManager;
+    public DlqController(Broker broker) {
+        this.broker = broker;
     }
 
     /**
@@ -29,7 +29,7 @@ public class DlqController {
      */
     @GetMapping("/{topic}")
     public List<DlqEntry> list(@PathVariable String topic) {
-        MessageQueue queue = queueManager.getQueue(topic);
+        MessageQueue queue = broker.queues().getQueue(topic);
         if (queue == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "unknown topic '" + topic + "'");
         }
@@ -41,7 +41,7 @@ public class DlqController {
      */
     @PostMapping("/{topic}/replay")
     public Map<String, Integer> replay(@PathVariable String topic) {
-        MessageQueue queue = queueManager.getQueue(topic);
+        MessageQueue queue = broker.queues().getQueue(topic);
         if (queue == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, "unknown topic '" + topic + "'");
         }

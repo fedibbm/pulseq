@@ -29,6 +29,23 @@ pulseq:
   # Purge completed messages (acknowledged/dead-lettered/expired) older than this. 0 disables.
   retention-hours: 24
   retention-sweep-rate-ms: 60000
+  # Cluster mode: this server is one broker of a cluster and serves clients only while it is
+  # the leader. See "Cluster mode" in the README.
+  cluster:
+    enabled: false
+    node-id: 0
+    # Every broker, this one included: id@clusterHost:clusterPort@publicUrl, comma-separated.
+    nodes: ""
+    # Where this broker keeps its Raft log.
+    data-dir: ./data
+    # How long a publish or acknowledgement waits for a majority of brokers.
+    commit-timeout-ms: 5000
+    # Timing in ticks of tick-ms: a broker that hears no leader for a random time between
+    # election-min-ticks and election-max-ticks starts an election.
+    tick-ms: 10
+    election-min-ticks: 50
+    election-max-ticks: 100
+    heartbeat-ticks: 10
 
 logging:
   level:

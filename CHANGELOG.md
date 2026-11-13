@@ -3,6 +3,24 @@
 All notable changes to PulseQ, tracked against the commit history. Each section
 groups the commits landed on that date.
 
+## [2026-11-13]
+
+### Added
+- **Cluster mode in the server**, configured with `pulseq.cluster.enabled`,
+  `node-id`, `nodes` and `data-dir`.
+- `ClusterServerTest`, covering a publish that reaches the leader.
+
+### Changed
+- A publish sent to a follower answers `307` with the leader's URL, and `503`
+  with `Retry-After` during an election.
+- `GET /health` reports the role and the leader; `GET /health/leader` answers
+  `200` only on the leader.
+
+### Known limitations
+The broker list is fixed at start, the Raft log is never compacted, the
+duplicate-id window does not carry over to a new leader, and traffic between
+brokers is neither authenticated nor encrypted.
+
 ## [2026-11-12]
 
 ### Added

@@ -27,11 +27,15 @@ import java.util.concurrent.TimeUnit;
  * believing it leads until it hears from them; its writes fail with
  * {@link ReplicationException} meanwhile.</p>
  */
-public final class ClusteredBroker implements AutoCloseable {
+public final class ClusteredBroker implements Broker, AutoCloseable {
 
     /** What exists only while this broker leads. */
-    private record Session(QueueManager queues, Dispatcher dispatcher, VisibilityTimeoutChecker checker) {
+    private record Session(QueueManager queues, Dispatcher dispatcher, VisibilityTimeoutChecker checker,
+                           RetentionSweeper sweeper) {
         void stop() {
+            if (sweeper != null) {
+                sweeper.stop();
+            }
             checker.stop();
             dispatcher.shutdown();
         }
@@ -47,6 +51,8 @@ public final class ClusteredBroker implements AutoCloseable {
     private final List<Subscription> subscriptions = new CopyOnWriteArrayList<>();
     private final ExecutorService lifecycle;
     private volatile Session session;
+    private volatile long retentionMillis;
+    private volatile long retentionSweepRateMillis;
 
     public ClusteredBroker(int id, List<Integer> members, MessageStore localStore,
                            RaftStorage raftStorage, Transport transport, BrokerConfig config,
@@ -76,6 +82,15 @@ public final class ClusteredBroker implements AutoCloseable {
         this.store.attach(raft);
     }
 
+    /**
+     * Makes the leader purge finished messages older than {@code retentionMillis}, on every
+     * broker. Call before {@link #start()}; off by default.
+     */
+    public void enableRetention(long retentionMillis, long sweepRateMillis) {
+        this.retentionMillis = retentionMillis;
+        this.retentionSweepRateMillis = sweepRateMillis;
+    }
+
     public void start() {
         raft.start();
     }
@@ -90,11 +105,16 @@ public final class ClusteredBroker implements AutoCloseable {
                 new VisibilityTimeoutChecker(queues, config.getTimeoutCheckRateMillis());
         // Published before the subscriptions are replayed, so a subscribe() racing with the
         // takeover lands on this session either way; subscribing twice is harmless.
-        session = new Session(queues, dispatcher, checker);
+        RetentionSweeper sweeper = retentionMillis > 0
+                ? new RetentionSweeper(store, retentionMillis, retentionSweepRateMillis) : null;
+        session = new Session(queues, dispatcher, checker, sweeper);
         for (Subscription subscription : subscriptions) {
             dispatcher.subscribe(subscription.topic(), subscription.groupId(), subscription.listener());
         }
         checker.start();
+        if (sweeper != null) {
+            sweeper.start();
+        }
     }
 
     private void stepAside() {
@@ -151,6 +171,7 @@ public final class ClusteredBroker implements AutoCloseable {
      *
      * @param groupId consumer group, or null to receive every message
      */
+    @Override
     public void subscribe(String topic, String groupId, MessageListener listener) {
         subscriptions.add(new Subscription(topic, groupId, listener));
         Session current = session;
@@ -167,11 +188,21 @@ public final class ClusteredBroker implements AutoCloseable {
         }
     }
 
+    @Override
+    public void unsubscribe(MessageListener listener) {
+        subscriptions.removeIf(s -> s.listener() == listener);
+        Session current = session;
+        if (current != null) {
+            current.dispatcher().onSessionClosed(listener);
+        }
+    }
+
     /**
      * The queues of the current leadership.
      *
      * @throws NotLeaderException when this broker is not the leader, or has not finished taking over
      */
+    @Override
     public QueueManager queues() {
         Session current = session;
         if (current == null) {
@@ -187,6 +218,7 @@ public final class ClusteredBroker implements AutoCloseable {
     }
 
     /** True once this broker leads and has rebuilt its queues. */
+    @Override
     public boolean isServing() {
         return session != null;
     }

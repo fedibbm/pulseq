@@ -1,5 +1,6 @@
 package com.pulseq.server;
 
+import com.pulseq.core.Broker;
 import com.pulseq.core.Message;
 import com.pulseq.core.QueueManager;
 import org.springframework.http.HttpStatus;
@@ -20,11 +21,11 @@ import java.util.concurrent.TimeUnit;
 public class PublishController {
 
 
-    private final QueueManager queueManager;
+    private final Broker broker;
     private final long publishTimeoutMillis;
 
-    public PublishController(QueueManager queueManager, BrokerConfigProperties properties) {
-        this.queueManager = queueManager;
+    public PublishController(Broker broker, BrokerConfigProperties properties) {
+        this.broker = broker;
         this.publishTimeoutMillis = properties.getPublishTimeoutMillis();
     }
 
@@ -39,6 +40,9 @@ public class PublishController {
      *
      * <p>Returns {@code 429} when the topic stays full for the whole backpressure window, rather
      * than holding the request thread indefinitely.</p>
+     *
+     * <p>In a cluster, a broker that is not the leader answers {@code 307} with the leader's
+     * URL, or {@code 503} while no leader is known.</p>
      */
     @PostMapping("/{topic}")
     public ResponseEntity<Map<String, Object>> publish(
@@ -64,7 +68,7 @@ public class PublishController {
                 ? request.ttlMillis() : 0;
         Message message = new Message(id, normalizedTopic, payload, maxRetries, ttlMillis);
 
-        QueueManager.PublishResult result = queueManager.tryOffer(
+        QueueManager.PublishResult result = broker.queues().tryOffer(
                 normalizedTopic, message, publishTimeoutMillis, TimeUnit.MILLISECONDS);
 
         if (result == QueueManager.PublishResult.DUPLICATE) {

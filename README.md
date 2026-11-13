@@ -10,7 +10,8 @@ alternative between Kafka (too heavy) and Redis Streams (too limited).
 
 | Module | Description |
 |---|---|
-| `pulseq-core` | Framework-free broker core: concurrent queues, dispatcher, dead-letter queues, visibility timeouts, persistence SPI |
+| `pulseq-raft` | Raft consensus written from scratch: leader election, log replication, a log on disk, TCP between brokers. See its [README](pulseq-raft/README.md) |
+| `pulseq-core` | Framework-free broker core: concurrent queues, dispatcher, dead-letter queues, visibility timeouts, persistence SPI, and the clustered broker |
 | `pulseq-server` | Spring Boot 3 thin API layer: REST publish endpoint + WebSocket consume endpoint |
 | `pulseq-sdk` | Plain-Java client with an in-process mode for tests and a network mode over HTTP/WebSocket |
 | `pulseq-dashboard` | Angular 17 single-page dashboard served by the server at `/` |
@@ -149,6 +150,50 @@ Server settings live under `pulseq.*` (see `pulseq-server/src/main/resources/app
 | `pulseq.dashboard-path` | `../pulseq-dashboard/dist/.../browser` | where the built dashboard lives; skipped when absent |
 | `pulseq.retention-hours` | `24` | purge completed messages (acked/dead-lettered/expired) older than this; `0` disables |
 | `pulseq.retention-sweep-rate-ms` | `60000` | how often the retention sweep runs |
+
+## Cluster mode
+
+Three or more PulseQ servers can run as a cluster that keeps serving when one is lost. The
+brokers agree on every change through Raft (implemented from scratch in `pulseq-raft`): a
+publish or an acknowledgement is confirmed only once a majority of brokers hold it on disk.
+One broker is the leader and serves clients; if it stops, another takes over with every
+message that was not yet acknowledged. A cluster of three survives losing one broker, a
+cluster of five survives losing two.
+
+```bash
+NODES="0@127.0.0.1:9100@http://127.0.0.1:8080,1@127.0.0.1:9101@http://127.0.0.1:8081,2@127.0.0.1:9102@http://127.0.0.1:8082"
+for i in 0 1 2; do
+  java -jar pulseq-server/target/pulseq-server-0.1.0.jar \
+    --server.port=808$i \
+    --pulseq.cluster.enabled=true --pulseq.cluster.node-id=$i \
+    --pulseq.cluster.nodes=$NODES --pulseq.cluster.data-dir=./data/node-$i &
+done
+```
+
+| Setting | Meaning |
+|---|---|
+| `pulseq.cluster.enabled` | `true` to run as one broker of a cluster (default `false`) |
+| `pulseq.cluster.node-id` | This broker's id |
+| `pulseq.cluster.nodes` | Every broker as `id@clusterHost:clusterPort@publicUrl`, comma-separated, the same list on all |
+| `pulseq.cluster.data-dir` | Where this broker keeps its Raft log |
+
+What clients see:
+
+- **Publishing to a broker that is not the leader** answers `307` with the leader's URL, so
+  an HTTP client that follows redirects (`curl -L`) needs no cluster knowledge. During an
+  election the answer is `503` with `Retry-After`.
+- **`GET /health`** works on every broker and reports its role and the leader's URL.
+  **`GET /health/leader`** answers `200` only on the leader, for a load balancer or a
+  Kubernetes readiness probe.
+- **Consumers** may connect to any broker, but only the leader delivers. A consumer that
+  wants no interruption connects to all brokers.
+- **Delivery stays at-least-once.** A message being processed when the leader is lost is
+  delivered again by the next leader.
+
+Current limits: the list of brokers is fixed at start, the Raft log is never compacted, the
+duplicate-id window does not carry over to a new leader, and traffic between brokers is
+neither authenticated nor encrypted, so the cluster port must be private. Publishes on one
+topic are confirmed one at a time.
 
 ## Quickstart
 
